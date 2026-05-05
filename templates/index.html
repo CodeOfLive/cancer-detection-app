@@ -1,0 +1,452 @@
+﻿<!DOCTYPE html>
+<html lang="tr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Histopatolojik Hücre Analizi</title>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
+        
+        :root {
+            --primary: #053BDB;
+            --secondary: #4E04DC;
+            --accent: #00D4C4;
+            --text-light: #ffffff;
+            --text-dark: #1a202c;
+            --glass-bg: rgba(255, 255, 255, 0.95);
+        }
+
+        * { margin: 0; padding: 0; box-sizing: border-box; font-family: 'Inter', system-ui, sans-serif; }
+        
+        body {
+            min-height: 100vh;
+            color: var(--text-dark);
+            position: relative;
+            overflow-x: hidden;
+        }
+
+        /* Arka plan görseli + gradient overlay */
+        body::before {
+            content: '';
+            position: fixed;
+            top: 0; left: 0;
+            width: 100%; height: 100%;
+            background: 
+                linear-gradient(135deg, 
+                    rgba(5, 59, 219, 0.85) 0%, 
+                    rgba(78, 4, 220, 0.75) 50%,
+                    rgba(0, 212, 196, 0.65) 100%
+                ),
+                url('https://image.qwenlm.ai/public_source/2b8291c3-b829-49ec-831b-21c1f802d35d/5d983c9c7-fe2c-40c8-a9d6-d4561ad9e7dc8660.png') center/cover no-repeat;
+            z-index: -2;
+            background-attachment: fixed;
+        }
+
+        /* Animasyonlu parçacıklar */
+        .particles {
+            position: fixed;
+            top: 0; left: 0;
+            width: 100%; height: 100%;
+            pointer-events: none;
+            z-index: -1;
+        }
+        .particle {
+            position: absolute;
+            width: 6px; height: 6px;
+            background: var(--accent);
+            border-radius: 50%;
+            opacity: 0.4;
+            animation: float 20s infinite ease-in-out;
+            box-shadow: 0 0 15px var(--accent);
+        }
+        .particle:nth-child(1) { left: 10%; top: 20%; animation-delay: 0s; animation-duration: 18s; }
+        .particle:nth-child(2) { left: 30%; top: 70%; animation-delay: 4s; animation-duration: 22s; }
+        .particle:nth-child(3) { left: 50%; top: 40%; animation-delay: 8s; animation-duration: 16s; }
+        .particle:nth-child(4) { left: 70%; top: 80%; animation-delay: 2s; animation-duration: 20s; }
+        .particle:nth-child(5) { left: 90%; top: 15%; animation-delay: 6s; animation-duration: 19s; }
+        .particle:nth-child(6) { left: 20%; top: 50%; animation-delay: 10s; animation-duration: 21s; }
+        
+        @keyframes float {
+            0%, 100% { transform: translateY(0) translateX(0) scale(1); opacity: 0.4; }
+            25% { transform: translateY(-20px) translateX(10px) scale(1.1); opacity: 0.7; }
+            50% { transform: translateY(-40px) translateX(-10px) scale(1); opacity: 0.5; }
+            75% { transform: translateY(-20px) translateX(15px) scale(1.2); opacity: 0.8; }
+        }
+
+        .container {
+            max-width: 950px;
+            margin: 0 auto;
+            padding: 2rem 1.5rem;
+            position: relative;
+            z-index: 1;
+        }
+
+        /* Header - Gradient + animasyon */
+        header {
+            background: linear-gradient(135deg, var(--primary), var(--secondary));
+            color: var(--text-light);
+            padding: 2.5rem 2rem;
+            border-radius: 20px;
+            text-align: center;
+            margin-bottom: 2rem;
+            box-shadow: 
+                0 10px 40px rgba(5, 59, 219, 0.4),
+                0 0 80px rgba(0, 212, 196, 0.2);
+            position: relative;
+            overflow: hidden;
+            border: 1px solid rgba(0, 212, 196, 0.3);
+        }
+        header::before {
+            content: '';
+            position: absolute;
+            top: -50%; left: -50%;
+            width: 200%; height: 200%;
+            background: radial-gradient(circle, rgba(0, 212, 196, 0.25) 0%, transparent 60%);
+            animation: pulse 6s ease-in-out infinite;
+        }
+        @keyframes pulse {
+            0%, 100% { transform: scale(1) rotate(0deg); opacity: 0.5; }
+            50% { transform: scale(1.15) rotate(5deg); opacity: 0.9; }
+        }
+        header h1 {
+            font-size: 2.4rem;
+            font-weight: 700;
+            margin-bottom: 0.5rem;
+            position: relative;
+            text-shadow: 0 2px 20px rgba(0,0,0,0.2);
+        }
+        header p {
+            opacity: 0.95;
+            font-size: 1.05rem;
+            position: relative;
+        }
+
+        /* Uyarı kutusu - Accent rengi vurgulu */
+        .disclaimer {
+            background: rgba(0, 212, 196, 0.15);
+            border-left: 4px solid var(--accent);
+            padding: 1rem 1.5rem;
+            border-radius: 12px;
+            margin-bottom: 2rem;
+            font-size: 0.9rem;
+            backdrop-filter: blur(10px);
+            border: 1px solid rgba(0, 212, 196, 0.3);
+        }
+        .disclaimer strong { color: var(--primary); }
+
+        /* Kartlar - Glassmorphism + beyaz */
+        .card {
+            background: var(--glass-bg);
+            border-radius: 20px;
+            padding: 2rem;
+            margin-bottom: 2rem;
+            box-shadow: 0 12px 40px rgba(0, 0, 0, 0.15);
+            border: 1px solid rgba(255, 255, 255, 0.5);
+            backdrop-filter: blur(20px);
+            transition: all 0.3s ease;
+        }
+        .card:hover {
+            transform: translateY(-4px);
+            box-shadow: 0 16px 50px rgba(5, 59, 219, 0.25);
+            border-color: rgba(0, 212, 196, 0.4);
+        }
+
+        .upload-area {
+            border: 2px dashed var(--primary);
+            border-radius: 16px;
+            padding: 3rem 2rem;
+            text-align: center;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            background: linear-gradient(135deg, rgba(5, 59, 219, 0.05), rgba(0, 212, 196, 0.05));
+        }
+        .upload-area:hover {
+            border-color: var(--accent);
+            background: linear-gradient(135deg, rgba(5, 59, 219, 0.12), rgba(0, 212, 196, 0.12));
+            transform: translateY(-2px);
+            box-shadow: 0 8px 25px rgba(0, 212, 196, 0.2);
+        }
+        .upload-area input { display: none; }
+        .upload-area label {
+            font-size: 1.15rem;
+            color: var(--primary);
+            cursor: pointer;
+            font-weight: 600;
+            transition: color 0.3s ease;
+        }
+        .upload-area label:hover { color: var(--secondary); }
+
+        .preview-container {
+            margin-top: 1.5rem;
+            text-align: center;
+            display: none;
+        }
+        .preview-container img {
+            max-width: 100%;
+            max-height: 350px;
+            border-radius: 14px;
+            border: 3px solid var(--border);
+            box-shadow: 0 8px 25px rgba(0, 0, 0, 0.15);
+        }
+
+        .btn-primary {
+            background: linear-gradient(135deg, var(--primary), var(--secondary));
+            color: white;
+            border: none;
+            padding: 1.1rem 3rem;
+            font-size: 1.05rem;
+            font-weight: 600;
+            border-radius: 12px;
+            cursor: pointer;
+            margin-top: 1.5rem;
+            transition: all 0.3s ease;
+            box-shadow: 0 6px 25px rgba(5, 59, 219, 0.4);
+            position: relative;
+            overflow: hidden;
+        }
+        .btn-primary::before {
+            content: '';
+            position: absolute;
+            top: 0; left: -100%;
+            width: 100%; height: 100%;
+            background: linear-gradient(90deg, transparent, rgba(255,255,255,0.3), transparent);
+            transition: left 0.6s ease;
+        }
+        .btn-primary:hover::before { left: 100%; }
+        .btn-primary:hover:not(:disabled) {
+            transform: translateY(-3px);
+            box-shadow: 0 10px 35px rgba(0, 212, 196, 0.5);
+        }
+        .btn-primary:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+
+        /* Sonuç kartları */
+        .result-card {
+            display: none;
+            animation: slideUp 0.6s ease;
+        }
+        .result-card.show { display: block; }
+        @keyframes slideUp {
+            from { opacity: 0; transform: translateY(30px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+
+        .metric-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+            gap: 1.5rem;
+            margin-top: 1.5rem;
+        }
+        .metric-box {
+            border-radius: 16px;
+            padding: 1.75rem;
+            text-align: center;
+            border: 2px solid transparent;
+            position: relative;
+            overflow: hidden;
+            transition: transform 0.3s ease;
+        }
+        .metric-box:hover {
+            transform: translateY(-3px);
+        }
+        .metric-box h3 {
+            font-size: 0.85rem;
+            text-transform: uppercase;
+            letter-spacing: 0.8px;
+            margin-bottom: 0.75rem;
+            font-weight: 600;
+        }
+        .metric-box .value {
+            font-size: 2.2rem;
+            font-weight: 700;
+        }
+
+        /* Risk seviyeleri - Gradient geçişli (SENİN PALETİN) */
+        .risk-low {
+            background: linear-gradient(135deg, #e6fffa 0%, #b2f5ea 50%, #81e6d9 100%);
+            border-color: var(--accent);
+            box-shadow: 0 4px 20px rgba(0, 212, 196, 0.3);
+        }
+        .risk-low h3, .risk-low .value { color: #0f766e; }
+
+        .risk-medium {
+            background: linear-gradient(135deg, #eef2ff 0%, #c7d2fe 50%, #a5b4fc 100%);
+            border-color: var(--primary);
+            box-shadow: 0 4px 20px rgba(5, 59, 219, 0.3);
+        }
+        .risk-medium h3, .risk-medium .value { color: var(--primary); }
+
+        .risk-high {
+            background: linear-gradient(135deg, var(--primary) 0%, var(--secondary) 50%, #6d28d9 100%);
+            border-color: var(--secondary);
+            box-shadow: 0 4px 20px rgba(78, 4, 220, 0.4);
+        }
+        .risk-high h3, .risk-high .value { color: white; text-shadow: 0 2px 10px rgba(0,0,0,0.2); }
+
+        .ratio-box {
+            background: linear-gradient(135deg, #e6fffa, #b2f5ea, #81e6d9);
+            border-color: var(--accent);
+            box-shadow: 0 4px 20px rgba(0, 212, 196, 0.25);
+        }
+        .ratio-box .value { color: var(--accent); text-shadow: 0 2px 8px rgba(0, 212, 196, 0.3); }
+
+        .patch-box {
+            background: linear-gradient(135deg, #f7fafc, #edf2f7, #e2e8f0);
+            border-color: rgba(5, 59, 219, 0.2);
+        }
+        .patch-box .value { color: var(--text-dark); font-size: 1.7rem; }
+
+        .footer-note {
+            text-align: center;
+            margin-top: 2.5rem;
+            padding-top: 1.5rem;
+            border-top: 1px solid rgba(255,255,255,0.3);
+            font-size: 0.85rem;
+            color: rgba(255,255,255,0.9);
+        }
+
+        /* Mobil optimizasyon */
+        @media (max-width: 600px) {
+            .container { padding: 1rem; }
+            header { padding: 2rem 1.5rem; }
+            header h1 { font-size: 1.7rem; }
+            header p { font-size: 0.95rem; }
+            .card { padding: 1.5rem; }
+            .metric-grid { grid-template-columns: 1fr; gap: 1rem; }
+            .metric-box { padding: 1.25rem; }
+            .metric-box .value { font-size: 1.8rem; }
+            .upload-area { padding: 2rem 1.5rem; }
+            .btn-primary { width: 100%; padding: 1rem; }
+        }
+    </style>
+</head>
+<body>
+    <!-- Animasyonlu parçacıklar -->
+    <div class="particles">
+        <div class="particle"></div>
+        <div class="particle"></div>
+        <div class="particle"></div>
+        <div class="particle"></div>
+        <div class="particle"></div>
+        <div class="particle"></div>
+    </div>
+
+    <div class="container">
+        <header>
+            <h1>🔬 Histopatolojik Hücre Analizi</h1>
+            <p>Derin öğrenme destekli mikroskop görüntüsü analiz sistemi</p>
+        </header>
+
+        <div class="disclaimer">
+            ⚠️ <strong>Yasal Uyarı:</strong> Bu sistem tıbbi teşhis koymaz, sadece tahmini risk analizi yapar. 
+            Gerçek klinik kullanımda patoloji uzmanı onayı gereklidir. Bu proje akademik amaçlıdır.
+        </div>
+
+        <div class="card">
+            <h2 style="margin-bottom: 1.5rem; color: var(--primary); font-weight: 600;"> Görüntü Yükle</h2>
+            
+            <div class="upload-area" onclick="document.getElementById('imageInput').click()">
+                <input type="file" id="imageInput" accept=".jpg,.jpeg,.png,.webp">
+                <label>📁 Dosya seçmek için tıklayın veya sürükleyin</label>
+            </div>
+
+            <div class="preview-container" id="previewContainer">
+                <img id="previewImage" alt="Yüklenen görüntü">
+            </div>
+
+            <div style="text-align: center;">
+                <button class="btn-primary" id="analyzeBtn" onclick="analyzeImage()" disabled>
+                    🔍 Analiz Et
+                </button>
+            </div>
+        </div>
+
+        <div class="card result-card" id="resultCard">
+            <h2 style="margin-bottom: 0.5rem; color: var(--primary); font-weight: 600;">📊 Analiz Sonuçları</h2>
+            <div class="metric-grid">
+                <div class="metric-box ratio-box">
+                    <h3>Kanserli Hücre Oranı</h3>
+                    <div class="value" id="cancerRatio">-%</div>
+                </div>
+                <div class="metric-box" id="riskBox">
+                    <h3>Risk Seviyesi</h3>
+                    <div class="value" id="riskLevel">-</div>
+                </div>
+                <div class="metric-box patch-box">
+                    <h3>Patch Detayı</h3>
+                    <div class="value" id="patchDetail">-</div>
+                </div>
+            </div>
+            <div style="margin-top: 1.5rem; padding: 1rem; background: rgba(0, 212, 196, 0.1); border-radius: 10px; font-size: 0.9rem; color: var(--text-dark); text-align: center; border: 1px solid rgba(0, 212, 196, 0.2);">
+                ⚠️ Bu çıktı tahmini bir risk değerlendirmesidir. Kesin teşhis için patoloji uzmanına başvurunuz.
+            </div>
+        </div>
+
+        <footer class="footer-note">
+            © 2026 Histopathology AI Analyzer | Akademik Prototip v1.0
+        </footer>
+    </div>
+
+    <script>
+        const imageInput = document.getElementById('imageInput');
+        const previewContainer = document.getElementById('previewContainer');
+        const previewImage = document.getElementById('previewImage');
+        const analyzeBtn = document.getElementById('analyzeBtn');
+        const resultCard = document.getElementById('resultCard');
+        const riskBox = document.getElementById('riskBox');
+
+        imageInput.addEventListener('change', function(e) {
+            const file = e.target.files[0];
+            if (file) {
+                const reader = new FileReader();
+                reader.onload = function(e) {
+                    previewImage.src = e.target.result;
+                    previewContainer.style.display = 'block';
+                    analyzeBtn.disabled = false;
+                }
+                reader.readAsDataURL(file);
+            }
+        });
+
+        async function analyzeImage() {
+            const file = imageInput.files[0];
+            if (!file) return;
+
+            const formData = new FormData();
+            formData.append('image', file);
+
+            analyzeBtn.disabled = true;
+            analyzeBtn.innerHTML = '⏳ Analiz Ediliyor...';
+            resultCard.classList.remove('show');
+
+            try {
+                const response = await fetch('/upload', { method: 'POST', body: formData });
+                const data = await response.json();
+
+                if (data.error) {
+                    alert('❌ Hata: ' + data.error);
+                } else {
+                    document.getElementById('cancerRatio').textContent = `%${data.cancer_ratio}`;
+                    
+                    const riskEl = document.getElementById('riskLevel');
+                    riskEl.textContent = data.risk_level.toUpperCase();
+                    
+                    riskBox.className = `metric-box risk-${data.risk_level}`;
+                    
+                    document.getElementById('patchDetail').textContent = 
+                        `${data.cancer_patches} / ${data.total_patches}`;
+                    
+                    resultCard.classList.add('show');
+                }
+            } catch (err) {
+                alert('🌐 Bağlantı hatası: ' + err.message);
+            } finally {
+                analyzeBtn.disabled = false;
+                analyzeBtn.innerHTML = '🔍 Analiz Et';
+            }
+        }
+    </script>
+</body>
+</html>
