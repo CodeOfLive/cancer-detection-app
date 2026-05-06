@@ -1,1 +1,2 @@
-python-3.10.14
+Set-Content -Path "runtime.txt" -Value "python-3.10.14" -Encoding ASCII -NoNewline
+Get-Content runtime.txt  # Sadece 'python-3.10.14' yazmalı
