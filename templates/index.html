@@ -423,10 +423,18 @@
 
             try {
                 const response = await fetch('/upload', { method: 'POST', body: formData });
+                
+                // 🛡️ JSON yerine HTML hata gelirse yakala (timeout/crash koruması)
+                const contentType = response.headers.get("content-type");
+                if (!contentType || !contentType.includes("application/json")) {
+                    const errorText = await response.text();
+                    throw new Error(`Sunucu yanıtı bozuk: ${response.status} ${errorText.substring(0, 100)}`);
+                }
+
                 const data = await response.json();
 
                 if (data.error) {
-                    alert('❌ Hata: ' + data.error);
+                    alert('❌ ' + data.error);
                 } else {
                     document.getElementById('cancerRatio').textContent = `%${data.cancer_ratio}`;
                     
@@ -441,7 +449,14 @@
                     resultCard.classList.add('show');
                 }
             } catch (err) {
-                alert('🌐 Bağlantı hatası: ' + err.message);
+                // ⏱️ Timeout veya bağlantı kopması için kullanıcı dostu mesaj
+                if (err.message.includes('Failed to fetch') || 
+                    err.message.includes('NetworkError') || 
+                    err.message.includes('Unexpected end of JSON')) {
+                    alert('⏳ Sunucu yükleniyor veya zaman aşımına uğradı. Lütfen 15 saniye bekleyip tekrar deneyin.');
+                } else {
+                    alert('❌ ' + err.message);
+                }
             } finally {
                 analyzeBtn.disabled = false;
                 analyzeBtn.innerHTML = '🔍 Analiz Et';
