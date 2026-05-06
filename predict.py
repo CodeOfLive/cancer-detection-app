@@ -1,7 +1,79 @@
 import tensorflow as tf
 import numpy as np
 import cv2
+import os
 from pathlib import Path
+
+#  TF loglarını kapat & sadece CPU kullan (Render'da GPU yok, uyarılar süreyi uzatır)
+os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'
+tf.config.set_visible_devices([], 'GPU')
+
+BASE_DIR = Path(__file__).parent
+MODEL_PATH = BASE_DIR / "models" / "cancer_classifier.h5"
+
+print("🔄 Model yükleniyor...")
+model = tf.keras.models.load_model(MODEL_PATH)
+IMG_SIZE = 224
+PATCH_SIZE = 224
+print("✅ Model hazır!")
+
+def predict_image_patches(image_path, threshold=0.8, max_dimension=400):
+    import time
+    start_time = time.time()
+    
+    img = cv2.imread(str(image_path))
+    if img is None:
+        raise ValueError("Görüntü yüklenemedi")
+    
+    img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+    h, w, _ = img.shape
+    
+    # 📐 Otomatik küçültme (400px → max 1 tam patch + 1 kısmi = 2-4 inference)
+    if max(h, w) > max_dimension:
+        scale = max_dimension / max(h, w)
+        new_w, new_h = int(w * scale), int(h * scale)
+        img = cv2.resize(img, (new_w, new_h), interpolation=cv2.INTER_AREA)
+        h, w = new_h, new_w
+        
+    # 🛡️ Güvenlik: Görsel patch'ten küçükse direkt resize et
+    if h < PATCH_SIZE or w < PATCH_SIZE:
+        img = cv2.resize(img, (IMG_SIZE, IMG_SIZE))
+        h, w = IMG_SIZE, IMG_SIZE
+
+    cancer_count = 0
+    total_patches = 0
+    
+    for y in range(0, h - PATCH_SIZE + 1, PATCH_SIZE):
+        for x in range(0, w - PATCH_SIZE + 1, PATCH_SIZE):
+            patch = img[y:y+PATCH_SIZE, x:x+PATCH_SIZE]
+            patch = patch.astype("float32") / 255.0  # Rescaling katmanı için normalize et
+            patch = np.expand_dims(patch, axis=0)
+            
+            pred = model.predict(patch, verbose=0)[0][0]
+            cancer_prob = 1.0 - pred
+            if cancer_prob > threshold:
+                cancer_count += 1
+            total_patches += 1
+            
+            # ⏱️ 25 saniyeyi aşarsa erken çık (Render limiti 30s)
+            if time.time() - start_time > 25:
+                print("⚠️ Timeout sınırına yaklaşıldı, analiz durduruldu.")
+                break
+        if time.time() - start_time > 25:
+            break
+
+    cancer_ratio = (cancer_count / total_patches * 100) if total_patches > 0 else 0
+    risk_level = "düşük" if cancer_ratio < 30 else ("orta" if cancer_ratio < 70 else "yüksek")
+    
+    print(f"✅ Tamamlandı: {time.time()-start_time:.1f}s | {total_patches} patch | %{cancer_ratio} {risk_level}")
+    return {
+        "cancer_ratio": round(cancer_ratio, 2),
+        "risk_level": risk_level,
+        "total_patches": total_patches,
+        "cancer_patches": cancer_count,
+        "warning": "⚠️ Bu sistem tıbbi teşhis koymaz, sadece tahmini risk analizi yapar."
+    }
+
 
 BASE_DIR = Path(__file__).parent
 MODEL_PATH = BASE_DIR / "models" / "cancer_classifier.h5"
@@ -12,7 +84,7 @@ IMG_SIZE = 224
 PATCH_SIZE = 224
 print("✅ Model hazır!")
 
-def predict_image_patches(image_path, threshold=0.8, max_dimension=448):
+def predict_image_patches(image_path, threshold=0.8, max_dimension=400):
     """
     max_dimension: Resmin en büyük boyutu (genişlik veya yükseklik)
     448 = 2x2 patch (4 patch) -> Hızlı, timeout riski yok

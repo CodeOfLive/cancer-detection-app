@@ -58,8 +58,21 @@ def disclaimer():
     </div>
     """
 
+
+@app.errorhandler(413)
+def request_entity_too_large(error):
+    return jsonify({"error": "Dosya çok büyük. Lütfen daha küçük bir görsel yükleyin."}), 413
+
+@app.errorhandler(500)
+def internal_server_error(error):
+    return jsonify({"error": "Sunucu meşgul. Lütfen 10 saniye sonra tekrar deneyin."}), 500
+
+
+
 if __name__ == "__main__":
     # Render PORT ortam değişkenini kullan, yoksa 5000'e düş
     port = int(os.environ.get("PORT", 5000))
     # Production'da debug=False olmalı ama local test için True bırakabilirsin
     app.run(debug=False, host="0.0.0.0", port=port)
+
+
