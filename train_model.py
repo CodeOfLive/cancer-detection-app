@@ -6,7 +6,7 @@ from pathlib import Path
 # 📁 Yollar
 BASE_DIR = Path(__file__).parent
 DATA_DIR = BASE_DIR / "data" / "train"
-MODEL_SAVE_PATH = BASE_DIR / "models" / "cancer_classifier.keras"
+MODEL_SAVE_PATH = BASE_DIR / "models" / "cancer_classifier.h5"  # .keras → .h5
 os.makedirs("models", exist_ok=True)
 
 # ⚙️ Hyperparametreler

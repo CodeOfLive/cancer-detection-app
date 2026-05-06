@@ -4,7 +4,7 @@ import cv2
 from pathlib import Path
 
 BASE_DIR = Path(__file__).parent
-MODEL_PATH = BASE_DIR / "models" / "cancer_classifier.keras"
+MODEL_PATH = BASE_DIR / "models" / "cancer_classifier.h5"  # .keras → .h5
 
 print("🔄 Model yükleniyor...")
 model = tf.keras.models.load_model(MODEL_PATH)
