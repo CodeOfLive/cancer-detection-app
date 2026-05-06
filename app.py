@@ -14,9 +14,11 @@ os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 @app.route("/")
 def home():
     return render_template("index.html")
-
 @app.route("/upload", methods=["POST"])
 def upload_image():
+    import time
+    start_time = time.time()
+    
     if "image" not in request.files:
         return jsonify({"error": "Dosya bulunamadı"}), 400
     
@@ -25,20 +27,25 @@ def upload_image():
         return jsonify({"error": "Dosya seçilmedi"}), 400
     
     ext = Path(file.filename).suffix.lower()
-    if ext not in [".jpg", ".jpeg", ".png"]:
-        return jsonify({"error": "Sadece JPG/JPEG/PNG formatları desteklenir"}), 400
+    # .webp desteği eklendi
+    if ext not in [".jpg", ".jpeg", ".png", ".webp"]:
+        return jsonify({"error": "Sadece JPG/JPEG/PNG/WebP formatları desteklenir"}), 400
     
     filename = f"{uuid.uuid4().hex}{ext}"
     save_path = UPLOAD_FOLDER / filename
     file.save(save_path)
     
     try:
+        print(f"🔄 Analiz başlıyor: {filename}")
         result = predict_image_patches(save_path)
         result["image_path"] = f"/static/uploads/{filename}"
+        print(f"✅ Analiz tamamlandı: {time.time() - start_time:.2f} sn")
         return jsonify(result)
     except Exception as e:
+        print(f"❌ HATA: {str(e)}")
+        import traceback
+        traceback.print_exc()
         return jsonify({"error": f"Analiz hatası: {str(e)}"}), 500
-
 @app.route("/disclaimer")
 def disclaimer():
     return """
@@ -55,4 +62,4 @@ if __name__ == "__main__":
     # Render PORT ortam değişkenini kullan, yoksa 5000'e düş
     port = int(os.environ.get("PORT", 5000))
     # Production'da debug=False olmalı ama local test için True bırakabilirsin
-    app.run(debug=True, host="0.0.0.0", port=port)
+    app.run(debug=False, host="0.0.0.0", port=port)
