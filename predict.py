@@ -1,8 +1,21 @@
+import tensorflow as tf
+import numpy as np
+import cv2
+from pathlib import Path
+
+BASE_DIR = Path(__file__).parent
+MODEL_PATH = BASE_DIR / "models" / "cancer_classifier.h5"
+
+print(" Model yükleniyor...")
+model = tf.keras.models.load_model(MODEL_PATH)
+IMG_SIZE = 224
+PATCH_SIZE = 224
+print("✅ Model hazır!")
+
 def predict_image_patches(image_path, threshold=0.8, max_dimension=448):
     """
     max_dimension: Resmin en büyük boyutu (genişlik veya yükseklik)
-    448 = 2x2 patch (4 patch)
-    672 = 3x3 patch (9 patch) - timeout riski
+    448 = 2x2 patch (4 patch) -> Hızlı, timeout riski yok
     """
     import time
     start_time = time.time()
@@ -61,5 +74,24 @@ def predict_image_patches(image_path, threshold=0.8, max_dimension=448):
         "risk_level": risk_level,
         "total_patches": total_patches,
         "cancer_patches": cancer_count,
-        "warning": "️ Bu sistem tıbbi teşhis koymaz, sadece tahmini risk analizi yapar."
+        "warning": "⚠️ Bu sistem tıbbi teşhis koymaz, sadece tahmini risk analizi yapar."
     }
+
+def debug_single_prediction(image_path):
+    img = cv2.imread(str(image_path))
+    img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+    
+    patch = img[0:224, 0:224]
+    patch = cv2.resize(patch, (IMG_SIZE, IMG_SIZE))
+    patch = patch.astype("float32")
+    patch = np.expand_dims(patch, axis=0)
+    
+    pred = model.predict(patch, verbose=0)[0][0]
+    cancer_prob = 1.0 - pred
+    
+    print(f"🔍 DEBUG - Model çıktısı (raw): {pred:.4f}")
+    print(f"🔍 DEBUG - Kanser Olasılığı (düzeltildi): {cancer_prob:.4f}")
+    print(f"   Threshold: 0.5")
+    print(f"   Sonuç: {'KANSER' if cancer_prob > 0.5 else 'NORMAL'}")
+    
+    return pred
