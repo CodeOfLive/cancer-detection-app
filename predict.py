@@ -1,5 +1,6 @@
-import os, time, cv2, numpy as np, tensorflow as tf
+import os, time, numpy as np, tensorflow as tf
 from pathlib import Path
+from tensorflow.keras.utils import load_img, img_to_array
 
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'
 tf.config.set_visible_devices([], 'GPU')
@@ -7,7 +8,7 @@ tf.config.set_visible_devices([], 'GPU')
 BASE_DIR = Path(__file__).parent
 MODEL_PATH = BASE_DIR / "models" / "cancer_classifier.h5"
 IMG_SIZE, PATCH_SIZE = 224, 224
-MAX_PATCHES = 9  # Tüm patch'ler (doğruluk korunuyor)
+MAX_PATCHES = 9
 
 _model = None
 
@@ -23,32 +24,47 @@ def predict_image_patches(image_path, threshold=0.8):
     model = get_model()
     start = time.time()
     
-    img = cv2.imread(str(image_path))
-    if img is None: raise ValueError("Görüntü okunamadı")
-    img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
-    h, w, _ = img.shape
+    try:
+        #  Keras Native Yükleme (RGB + Float32 + [0, 255])
+        # target_size ile resmi önceden 672x672'ye küçültüyoruz (3x3 patch için)
+        img = load_img(str(image_path), target_size=(672, 672))
+        img_array = img_to_array(img)
+    except Exception as e:
+        raise ValueError(f"Görüntü yüklenemedi: {e}")
+
+    h, w, _ = img_array.shape
     
-    # Resmi küçült (max 672px → 3x3=9 patch)
-    max_dim = 672
-    if max(h, w) > max_dim:
-        scale = max_dim / max(h, w)
-        img = cv2.resize(img, (int(w*scale), int(h*scale)), interpolation=cv2.INTER_AREA)
-        h, w = img.shape[:2]
-    
+    # Eğer görsel patch boyutundan küçükse 224x224'e sabitle
     if h < PATCH_SIZE or w < PATCH_SIZE:
-        img = cv2.resize(img, (IMG_SIZE, IMG_SIZE))
+        img = load_img(str(image_path), target_size=(IMG_SIZE, IMG_SIZE))
+        img_array = img_to_array(img)
         h, w = IMG_SIZE, IMG_SIZE
 
     cancer_count, total_patches = 0, 0
+    
+    # Patch'lere böl
     for y in range(0, h - PATCH_SIZE + 1, PATCH_SIZE):
         for x in range(0, w - PATCH_SIZE + 1, PATCH_SIZE):
             if total_patches >= MAX_PATCHES: break
-            patch = img[y:y+PATCH_SIZE, x:x+PATCH_SIZE]
-            patch = patch.astype("float32") 
+            
+            # Patch'i kes
+            patch = img_array[y:y+PATCH_SIZE, x:x+PATCH_SIZE]
+            
+            # Modelin Rescaling(1./255) katmanı olduğu için [0, 255] aralığını koruyoruz.
+            # Sadece float32 olduğundan emin ol.
+            patch = patch.astype("float32")
             patch = np.expand_dims(patch, axis=0)
+            
+            # Tahmin
             pred = model.predict(patch, verbose=0)[0][0]
-            if (1.0 - pred) > threshold: cancer_count += 1
+            
+            # colon_aca=0 (Kanser), colon_n=1 (Normal) olduğu için:
+            cancer_prob = 1.0 - pred
+            
+            if cancer_prob > threshold:
+                cancer_count += 1
             total_patches += 1
+            
         if total_patches >= MAX_PATCHES: break
 
     ratio = (cancer_count / total_patches * 100) if total_patches > 0 else 0
