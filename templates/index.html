@@ -411,57 +411,89 @@
         });
 
         async function analyzeImage() {
-            const file = imageInput.files[0];
-            if (!file) return;
+    const file = imageInput.files[0];
+    if (!file) return;
 
-            const formData = new FormData();
-            formData.append('image', file);
+    const formData = new FormData();
+    formData.append('image', file);
 
-            analyzeBtn.disabled = true;
-            analyzeBtn.innerHTML = '⏳ Analiz Ediliyor...';
-            resultCard.classList.remove('show');
+    analyzeBtn.disabled = true;
+    
+    // 🔄 İlk analiz ise kullanıcıyı uyar
+    const isFirstAnalysis = !localStorage.getItem('cancer_analyzed');
+    if (isFirstAnalysis) {
+        analyzeBtn.innerHTML = '⏳ İlk analiz... (60 sn sürebilir)';
+    } else {
+        analyzeBtn.innerHTML = '⏳ Analiz Ediliyor...';
+    }
+    
+    resultCard.classList.remove('show');
 
-            try {
-                const response = await fetch('/upload', { method: 'POST', body: formData });
+    // 🔄 3 kez deneme hakkı (Retry logic)
+    let attempts = 0;
+    const maxAttempts = 3;
+    
+    while (attempts < maxAttempts) {
+        attempts++;
+        try {
+            const response = await fetch('/upload', { 
+                method: 'POST', 
+                body: formData,
+                headers: { 'Accept': 'application/json' }
+            });
+            
+            // JSON yerine HTML gelirse (502/504)
+            const contentType = response.headers.get("content-type");
+            if (!contentType || !contentType.includes("application/json")) {
+                const errorText = await response.text();
+                throw new Error(`Sunucu yanıtı bozuk: ${response.status}`);
+            }
+
+            const data = await response.json();
+
+            if (data.error) {
+                alert('❌ ' + data.error);
+                break;
+            } else {
+                // ✅ Başarılı
+                document.getElementById('cancerRatio').textContent = `%${data.cancer_ratio}`;
+                const riskEl = document.getElementById('riskLevel');
+                riskEl.textContent = data.risk_level.toUpperCase();
+                riskBox.className = `metric-box risk-${data.risk_level}`;
+                document.getElementById('patchDetail').textContent = 
+                    `${data.cancer_patches} / ${data.total_patches}`;
+                resultCard.classList.add('show');
                 
-                // 🛡️ JSON yerine HTML hata gelirse yakala (timeout/crash koruması)
-                const contentType = response.headers.get("content-type");
-                if (!contentType || !contentType.includes("application/json")) {
-                    const errorText = await response.text();
-                    throw new Error(`Sunucu yanıtı bozuk: ${response.status} ${errorText.substring(0, 100)}`);
-                }
-
-                const data = await response.json();
-
-                if (data.error) {
-                    alert('❌ ' + data.error);
-                } else {
-                    document.getElementById('cancerRatio').textContent = `%${data.cancer_ratio}`;
-                    
-                    const riskEl = document.getElementById('riskLevel');
-                    riskEl.textContent = data.risk_level.toUpperCase();
-                    
-                    riskBox.className = `metric-box risk-${data.risk_level}`;
-                    
-                    document.getElementById('patchDetail').textContent = 
-                        `${data.cancer_patches} / ${data.total_patches}`;
-                    
-                    resultCard.classList.add('show');
-                }
-            } catch (err) {
-                // ⏱️ Timeout veya bağlantı kopması için kullanıcı dostu mesaj
+                // ✅ Başarılı oldu, localstorage'a kaydet
+                localStorage.setItem('cancer_analyzed', 'true');
+                break;
+            }
+        } catch (err) {
+            console.log(`Deneme ${attempts} başarısız:`, err.message);
+            
+            if (attempts >= maxAttempts) {
+                // Tüm denemeler bitti
                 if (err.message.includes('Failed to fetch') || 
                     err.message.includes('NetworkError') || 
-                    err.message.includes('Unexpected end of JSON')) {
-                    alert('⏳ Sunucu yükleniyor veya zaman aşımına uğradı. Lütfen 15 saniye bekleyip tekrar deneyin.');
+                    err.message.includes('Unexpected end of JSON') ||
+                    err.message.includes('502') ||
+                    err.message.includes('504')) {
+                    alert('⏳ Sunucu yoğun veya ilk yükleme yapılıyor.\n\nLütfen 45 saniye bekleyip "Tekrar Dene" butonuna basın.\n\n(İlk analizde modelin RAM\'e yüklenmesi uzun sürebilir.)');
                 } else {
                     alert('❌ ' + err.message);
                 }
-            } finally {
-                analyzeBtn.disabled = false;
-                analyzeBtn.innerHTML = '🔍 Analiz Et';
+            } else {
+                // Bir sonraki denemeden önce bekle
+                analyzeBtn.innerHTML = `🔄 Tekrar Deniyor... (${attempts}/${maxAttempts})`;
+                await new Promise(resolve => setTimeout(resolve, 2000)); // 2 sn bekle
             }
         }
+    }
+    
+    // Butonu sıfırla
+    analyzeBtn.disabled = false;
+    analyzeBtn.innerHTML = '🔍 Analiz Et';
+}
     </script>
 </body>
 </html>
