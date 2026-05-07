@@ -44,7 +44,7 @@ def predict_image_patches(image_path, threshold=0.8):
         for x in range(0, w - PATCH_SIZE + 1, PATCH_SIZE):
             if total_patches >= MAX_PATCHES: break
             patch = img[y:y+PATCH_SIZE, x:x+PATCH_SIZE]
-            patch = patch.astype("float32") / 255.0
+            patch = patch.astype("float32") 
             patch = np.expand_dims(patch, axis=0)
             pred = model.predict(patch, verbose=0)[0][0]
             if (1.0 - pred) > threshold: cancer_count += 1
