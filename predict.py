@@ -1,6 +1,6 @@
 import os, time, numpy as np, tensorflow as tf
 from pathlib import Path
-from tensorflow.keras.utils import load_img, img_to_array
+from PIL import Image  # Keras utils yerine doğrudan PIL (daha stabil & hafıza dostu)
 
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'
 tf.config.set_visible_devices([], 'GPU')
@@ -25,40 +25,31 @@ def predict_image_patches(image_path, threshold=0.8):
     start = time.time()
     
     try:
-        #  Keras Native Yükleme (RGB + Float32 + [0, 255])
-        # target_size ile resmi önceden 672x672'ye küçültüyoruz (3x3 patch için)
-        img = load_img(str(image_path), target_size=(672, 672))
-        img_array = img_to_array(img)
+        #  PIL ile aç & thumbnail ile yerinde küçült (RAM şişmesini önler)
+        img = Image.open(str(image_path)).convert("RGB")
+        img.thumbnail((672, 672), Image.Resampling.LANCZOS)
+        img_array = np.array(img, dtype=np.float32)
     except Exception as e:
-        raise ValueError(f"Görüntü yüklenemedi: {e}")
+        raise ValueError(f"Görüntü okunamadı veya format desteklenmiyor: {e}")
 
     h, w, _ = img_array.shape
     
-    # Eğer görsel patch boyutundan küçükse 224x224'e sabitle
+    # Patch boyutundan küçükse 224x224'e sabitle
     if h < PATCH_SIZE or w < PATCH_SIZE:
-        img = load_img(str(image_path), target_size=(IMG_SIZE, IMG_SIZE))
-        img_array = img_to_array(img)
+        img = img.resize((IMG_SIZE, IMG_SIZE), Image.Resampling.LANCZOS)
+        img_array = np.array(img, dtype=np.float32)
         h, w = IMG_SIZE, IMG_SIZE
 
     cancer_count, total_patches = 0, 0
     
-    # Patch'lere böl
     for y in range(0, h - PATCH_SIZE + 1, PATCH_SIZE):
         for x in range(0, w - PATCH_SIZE + 1, PATCH_SIZE):
             if total_patches >= MAX_PATCHES: break
             
-            # Patch'i kes
             patch = img_array[y:y+PATCH_SIZE, x:x+PATCH_SIZE]
-            
-            # Modelin Rescaling(1./255) katmanı olduğu için [0, 255] aralığını koruyoruz.
-            # Sadece float32 olduğundan emin ol.
-            patch = patch.astype("float32")
             patch = np.expand_dims(patch, axis=0)
             
-            # Tahmin
             pred = model.predict(patch, verbose=0)[0][0]
-            
-            # colon_aca=0 (Kanser), colon_n=1 (Normal) olduğu için:
             cancer_prob = 1.0 - pred
             
             if cancer_prob > threshold:
@@ -70,13 +61,12 @@ def predict_image_patches(image_path, threshold=0.8):
     ratio = (cancer_count / total_patches * 100) if total_patches > 0 else 0
     risk = "düşük" if ratio < 30 else ("orta" if ratio < 70 else "yüksek")
     
-    elapsed = time.time() - start
-    print(f"✅ {elapsed:.1f}s | {total_patches} patch | %{ratio} {risk}")
+    print(f"✅ {time.time()-start:.1f}s | {total_patches} patch | %{ratio} {risk}")
     
     return {
         "cancer_ratio": round(ratio, 2),
         "risk_level": risk,
         "total_patches": total_patches,
         "cancer_patches": cancer_count,
-        "warning": "⚠️ Bu sistem tıbbi teşhis koymaz, sadece tahmini risk analizi yapar."
+        "warning": "️ Bu sistem tıbbi teşhis koymaz, sadece tahmini risk analizi yapar."
     }
