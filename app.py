@@ -155,12 +155,14 @@ def is_likely_histopathology(image_path):
     except Exception:
         return False, "Görsel okunamadı."
 
-# 🌐 API ROUTES (JSON Garantili)
+# 🌐 API ROUTES
 @app.route("/")
 def home():
     return render_template("index.html")
 
+# ✅ CSRF'den exempt et: @csrf.exempt
 @app.route("/upload", methods=["POST"])
+@csrf.exempt
 def upload_image():
     try:
         if "image" not in request.files:
@@ -226,12 +228,13 @@ def upload_image():
         return jsonify({"job_id": job_id})
     
     except Exception as e:
-        # 🔑 KRİTİK: API rotalarında her zaman JSON döndür
         print(f"❌ /upload genel hatası: {e}")
         traceback.print_exc()
         return jsonify({"error": f"Sunucu hatası: {str(e)}"}), 500
 
+# ✅ CSRF'den exempt et: @csrf.exempt
 @app.route("/status/<job_id>", methods=["GET"])
+@csrf.exempt
 def get_status(job_id):
     try:
         job = jobs.get(job_id)
@@ -241,14 +244,12 @@ def get_status(job_id):
     except Exception as e:
         return jsonify({"error": f"Status hatası: {str(e)}"}), 500
 
-# ⚠️ HATA YÖNETİCİLERİ (API vs HTML Ayrımı - Garantili)
+# ⚠️ HATA YÖNETİCİLERİ
 @app.errorhandler(500)
 def internal_error(error):
     db.session.rollback()
-    # API rotaları için JSON döndür
     if request.path.startswith('/upload') or request.path.startswith('/status') or request.is_json or request.headers.get('Accept') == 'application/json':
         return jsonify({"error": "Sunucu hatası. Lütfen tekrar deneyin."}), 500
-    # HTML bekleyen rotalar için
     return render_template("admin/login.html", error="Bir hata oluştu."), 500
 
 @app.errorhandler(404)
