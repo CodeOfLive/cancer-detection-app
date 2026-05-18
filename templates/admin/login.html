@@ -5,30 +5,47 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Admin Girişi</title>
     <style>
-        body { font-family: system-ui, sans-serif; background: #0f172a; color: #e2e8f0; display: flex; align-items: center; justify-content: center; height: 100vh; margin: 0; }
-        .login-box { background: #1e293b; padding: 2rem; border-radius: 12px; box-shadow: 0 10px 30px rgba(0,0,0,0.5); width: 100%; max-width: 360px; }
-        h2 { margin-top: 0; color: #38bdf8; text-align: center; }
-        input { width: 100%; padding: 12px; margin: 8px 0; border: 1px solid #334155; border-radius: 8px; background: #0f172a; color: white; box-sizing: border-box; }
-        button { width: 100%; padding: 12px; background: #38bdf8; color: #0f172a; border: none; border-radius: 8px; font-weight: bold; cursor: pointer; margin-top: 10px; }
+        body { font-family: system-ui, -apple-system, sans-serif; background: #0f172a; color: #e2e8f0; display: flex; align-items: center; justify-content: center; height: 100vh; margin: 0; }
+        .login-box { background: #1e293b; padding: 2rem; border-radius: 12px; box-shadow: 0 10px 30px rgba(0,0,0,0.5); width: 100%; max-width: 360px; border: 1px solid #334155; }
+        h2 { margin-top: 0; color: #38bdf8; text-align: center; font-size: 1.5rem; }
+        input { width: 100%; padding: 12px; margin: 8px 0; border: 1px solid #334155; border-radius: 8px; background: #0f172a; color: white; box-sizing: border-box; font-size: 1rem; }
+        input:focus { outline: none; border-color: #38bdf8; box-shadow: 0 0 0 3px rgba(56, 189, 248, 0.2); }
+        button { width: 100%; padding: 12px; background: #38bdf8; color: #0f172a; border: none; border-radius: 8px; font-weight: 600; cursor: pointer; margin-top: 16px; font-size: 1rem; transition: background 0.2s; }
         button:hover { background: #0ea5e9; }
-        .flash { background: #ef4444; color: white; padding: 8px; border-radius: 6px; margin-bottom: 10px; font-size: 0.9rem; text-align: center; }
+        button:active { transform: translateY(1px); }
+        .flash { background: #ef4444; color: white; padding: 10px; border-radius: 6px; margin-bottom: 12px; font-size: 0.9rem; text-align: center; border: 1px solid #dc2626; }
+        .flash.success { background: #22c55e; border-color: #16a34a; }
+        .footer-note { text-align: center; margin-top: 1.5rem; font-size: 0.8rem; color: #64748b; }
     </style>
 </head>
 <body>
     <div class="login-box">
         <h2>🔐 Admin Girişi</h2>
+        
         {% with messages = get_flashed_messages(with_categories=true) %}
             {% if messages %}
                 {% for category, message in messages %}
-                    <div class="flash">{{ message }}</div>
+                    <div class="flash {{ 'success' if category == 'success' else '' }}">{{ message }}</div>
                 {% endfor %}
             {% endif %}
         {% endwith %}
-        <form method="POST">
-            <input type="text" name="username" placeholder="Kullanıcı Adı" required autocomplete="username">
+        
+        {% if error %}
+            <div class="flash">{{ error }}</div>
+        {% endif %}
+        
+        <form method="POST" action="{{ url_for('admin.login') }}">
+            <!-- ✅ CSRF Token (Flask-WTF için ZORUNLU) -->
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
+            
+            <input type="text" name="username" placeholder="Kullanıcı Adı" required autocomplete="username" autofocus>
             <input type="password" name="password" placeholder="Şifre" required autocomplete="current-password">
             <button type="submit">Giriş Yap</button>
         </form>
+        
+        <div class="footer-note">
+            Histopathology AI Analyzer • Güvenli Yönetim Paneli
+        </div>
     </div>
 </body>
 </html>
