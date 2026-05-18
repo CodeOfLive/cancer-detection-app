@@ -11,32 +11,26 @@ from pathlib import Path
 from PIL import Image, ImageStat
 
 app = Flask(__name__)
-app.config["MAX_CONTENT_LENGTH"] = 32 * 1024 * 1024  # 32 MB
+app.config["MAX_CONTENT_LENGTH"] = 32 * 1024 * 1024
 app.config["SQLALCHEMY_DATABASE_URI"] = os.environ.get("DATABASE_URL")
 app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
 app.config["SECRET_KEY"] = os.environ.get("SECRET_KEY", os.urandom(32).hex())
 
 # 🔹 PostgreSQL (Neon) Optimizasyonu
 app.config["SQLALCHEMY_ENGINE_OPTIONS"] = {
-    "pool_pre_ping": True,          # Kopuk bağlantıları otomatik onar
-    "pool_recycle": 300,            # 5 dakikada bir bağlantıyı yenile
-    "connect_args": {
-        "sslmode": "require",
-        "connect_timeout": 10
-    }
+    "pool_pre_ping": True,
+    "pool_recycle": 300,
+    "connect_args": {"sslmode": "require", "connect_timeout": 10}
 }
 
 BASE_DIR = Path(__file__).parent
 UPLOAD_FOLDER = BASE_DIR / "static" / "uploads"
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 
-# ✅ Statik dosya yollarını garantiye al
 app.static_folder = 'static'
 app.static_url_path = '/static'
 
-# 🔒 Flask-Talisman: CSP Ayarları (Inline CSS/JS'e İzin Ver)
-# NOT: Production'da inline stilleri harici .css dosyasına taşımak en iyisidir,
-# ancak prototip aşamasında bu ayar güvenli bir şekilde izin verir.
+# 🔒 Talisman CSP
 csp = {
     'default-src': "'self'",
     'style-src': ["'self'", "'unsafe-inline'", "https://fonts.googleapis.com"],
@@ -47,7 +41,7 @@ csp = {
 }
 Talisman(app, force_https=False, content_security_policy=csp)
 
-# 🛡️ CSRF Koruması (Admin için esnetilecek)
+# 🛡️ CSRF Koruması
 csrf = CSRFProtect(app)
 
 db = SQLAlchemy(app)
@@ -82,7 +76,6 @@ class ImageUpload(db.Model):
     cancer_patches = db.Column(db.Integer)
     processing_time_ms = db.Column(db.Integer)
     status = db.Column(db.String(20), default="completed")
-    # patch_logs = db.relationship(...)  # İhtiyaç olursa eklenebilir
 
 class AuditLog(db.Model):
     __tablename__ = "audit_logs"
@@ -92,7 +85,7 @@ class AuditLog(db.Model):
     ip_address = db.Column(db.String(45))
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
 
-# 🔐 ADMIN PANEL YAPILANDIRMASI
+# 🔐 ADMIN PANEL
 class SecureAdminIndexView(AdminIndexView):
     @expose("/")
     def index(self):
@@ -102,23 +95,27 @@ class SecureAdminIndexView(AdminIndexView):
 
     @expose("/login", methods=["GET", "POST"])
     def login(self):
-        # 🛡️ Admin login rotası için CSRF'yi geçici devre dışı bırak
-        # Bu, Flask-Admin'in standart form yapısıyla uyumluluğu sağlar
         if request.method == "POST":
-            user = AdminUser.query.filter_by(username=request.form["username"]).first()
-            if user and user.check_password(request.form["password"]) and user.is_active:
+            username = request.form.get("username")
+            password = request.form.get("password")
+            user = AdminUser.query.filter_by(username=username).first()
+
+            if user and user.check_password(password) and user.is_active:
                 session["admin_logged_in"] = True
                 session["admin_user"] = user.username
-                # Audit log
                 try:
                     log = AuditLog(action="ADMIN_LOGIN", ip_address=request.remote_addr)
                     db.session.add(log)
                     db.session.commit()
-                except:
-                    pass
+                except Exception as e:
+                    db.session.rollback()
+                    print(f"⚠️ Audit log kaydı başarısız: {e}")
+                flash("Giriş başarılı.", "success")
                 return redirect(url_for(".index"))
-            flash("Geçersiz kullanıcı adı veya şifre.", "error")
-        return render_template("admin/login.html")
+            else:
+                flash("Geçersiz kullanıcı adı veya şifre.", "error")
+                
+        return self.render("admin/login.html")
 
     @expose("/logout")
     def logout(self):
@@ -133,15 +130,11 @@ class UploadModelView(ModelView):
     can_edit = False
     can_delete = False
 
-# 🛡️ CSRF'yi Admin rotaları için devre dışı bırak
-# Bu, Flask-Admin'in kendi CSRF mekanizması olmadığı için gereklidir
-@app.before_request
-def protect_admin_csrf():
-    if request.path.startswith('/admin'):
-        csrf.exempt(app)  # Sadece admin rotaları için
-
-admin = Admin(app, name=" Histopathology Admin", template_mode="bootstrap4", index_view=SecureAdminIndexView())
+admin = Admin(app, name="Histopathology Admin", template_mode="bootstrap4", index_view=SecureAdminIndexView())
 admin.add_view(UploadModelView(ImageUpload, db.session, name="Görüntü Analizleri"))
+
+# 🛡️ Admin rotaları için CSRF'yi güvenli şekilde esnet
+csrf.exempt(admin.blueprint)
 
 # 🛡️ YARDIMCI FONKSİYONLAR
 def log_audit(action, details=""):
@@ -242,15 +235,14 @@ def get_status(job_id):
         return jsonify({"error": "Job bulunamadı"}), 404
     return jsonify({"status": job["status"], "result": job["result"], "error": job["error"]})
 
-# ⚠️ HATA YÖNETİCİLERİ (API vs HTML Ayrımı)
+# ⚠️ HATA YÖNETİCİLERİ (Session Cleanup Garantili)
 @app.errorhandler(500)
 def internal_error(error):
-    # Eğer istek JSON bekliyorsa (API), JSON döndür
+    db.session.rollback()  # 🔑 Kritik: Session state'i sıfırlar
     if request.path.startswith('/upload') or request.path.startswith('/status') or request.is_json:
         return jsonify({"error": "Sunucu hatası"}), 500
-    # Eğer istek HTML bekliyorsa (Admin paneli), standart hatayı göster veya redirect et
-    # Bu satır, Admin panelinin çökmesini engeller
-    return render_template("admin/login.html", error="Bir hata oluştu."), 500
+    # Admin paneli için güvenli fallback
+    return render_template("admin/login.html", error="Sunucu tarafında beklenmeyen bir hata oluştu. Lütfen tekrar deneyin."), 500
 
 @app.errorhandler(404)
 def not_found(error):
@@ -267,7 +259,7 @@ with app.app_context():
             admin_user.set_password(os.environ.get("ADMIN_PASSWORD", "SecurePass123!"))
             db.session.add(admin_user)
             db.session.commit()
-            print(" Varsayılan admin oluşturuldu.")
+            print("✅ Varsayılan admin kullanıcısı oluşturuldu.")
     except Exception as e:
         print(f"⚠️ DB init hatası: {e}")
 
