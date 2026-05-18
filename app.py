@@ -46,6 +46,12 @@ Talisman(app, force_https=False, content_security_policy=csp)
 csrf = CSRFProtect(app)
 db = SQLAlchemy(app)
 
+# ✅ CSRF'yi /admin/* rotaları için devre dışı bırak (Flask-Admin uyumluluğu için)
+@app.before_request
+def exempt_admin_from_csrf():
+    if request.path.startswith('/admin'):
+        csrf._exempt_views.add(request.endpoint)
+
 # ️ MODELLER
 class AdminUser(db.Model):
     __tablename__ = "admins"
@@ -113,7 +119,7 @@ class SecureAdminIndexView(AdminIndexView):
             if user and user.check_password(password) and user.is_active:
                 session["admin_logged_in"] = True
                 session["admin_user"] = user.username
-                session.permanent = True  # Session ömrünü uzat
+                session.permanent = True
                 try:
                     log = AuditLog(action="ADMIN_LOGIN", ip_address=request.remote_addr)
                     db.session.add(log)
@@ -133,7 +139,7 @@ class SecureAdminIndexView(AdminIndexView):
         session.pop("admin_user", None)
         return redirect(url_for(".login"))
 
-# 🔐 Admin View için özel ModelView (auth kontrolü ekli)
+# 🔐 Admin View için özel ModelView
 class SecureModelView(ModelView):
     def is_accessible(self):
         return session.get("admin_logged_in")
@@ -159,12 +165,9 @@ class UploadModelView(SecureModelView):
         "status": "Durum"
     }
 
-# ✅ Admin'i başlat ve CSRF'den muaf tut
+# Admin'i başlat
 admin = Admin(app, name="Histopathology Admin", template_mode="bootstrap4", index_view=SecureAdminIndexView())
 admin.add_view(UploadModelView(ImageUpload, db.session, name="Görüntü Analizleri"))
-
-# ✅ Flask-Admin'in TÜM rotalarını CSRF'den muaf tut (CRITICAL FIX)
-csrf.exempt(admin)
 
 # 🛡️ YARDIMCI FONKSİYONLAR
 def log_audit(action, details="", ip_address=None):
