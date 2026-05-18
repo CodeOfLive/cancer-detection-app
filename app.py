@@ -5,7 +5,7 @@ from flask_sqlalchemy import SQLAlchemy
 from flask_admin import Admin, AdminIndexView, expose
 from flask_admin.contrib.sqla import ModelView
 from flask_talisman import Talisman
-from flask_wtf.csrf import CSRFProtect, csrf_exempt
+from flask_wtf import CSRFProtect  # ✅ Sadece CSRFProtect import et, csrf_exempt YOK
 from werkzeug.security import generate_password_hash, check_password_hash
 from pathlib import Path
 from PIL import Image, ImageStat
@@ -41,7 +41,7 @@ csp = {
 }
 Talisman(app, force_https=False, content_security_policy=csp)
 
-# 🛡️ CSRF Koruması
+# 🛡️ CSRF Koruması (Sadece Protect, exempt YOK)
 csrf = CSRFProtect(app)
 
 db = SQLAlchemy(app)
@@ -121,11 +121,6 @@ class SecureAdminIndexView(AdminIndexView):
     def logout(self):
         session.pop("admin_logged_in", None)
         return redirect(url_for(".login"))
-
-# ✅ CSRF'yi admin login view'ı için exempt et (Doğru Yöntem)
-@csrf_exempt
-def admin_login_view():
-    return SecureAdminIndexView.login
 
 class UploadModelView(ModelView):
     column_list = ("id", "original_name", "risk_level", "cancer_ratio", "uploaded_at", "status")
