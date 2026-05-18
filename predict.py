@@ -1,6 +1,6 @@
 import os, time, numpy as np, tensorflow as tf
 from pathlib import Path
-from PIL import Image  # Keras utils yerine doğrudan PIL (daha stabil & hafıza dostu)
+from PIL import Image  # Keras utils yerine PIL kullanıyoruz
 
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'
 tf.config.set_visible_devices([], 'GPU')
@@ -25,7 +25,7 @@ def predict_image_patches(image_path, threshold=0.8):
     start = time.time()
     
     try:
-        #  PIL ile aç & thumbnail ile yerinde küçült (RAM şişmesini önler)
+        # PIL ile aç & thumbnail ile yerinde küçült (RAM şişmesini önler)
         img = Image.open(str(image_path)).convert("RGB")
         img.thumbnail((672, 672), Image.Resampling.LANCZOS)
         img_array = np.array(img, dtype=np.float32)
@@ -68,5 +68,5 @@ def predict_image_patches(image_path, threshold=0.8):
         "risk_level": risk,
         "total_patches": total_patches,
         "cancer_patches": cancer_count,
-        "warning": "️ Bu sistem tıbbi teşhis koymaz, sadece tahmini risk analizi yapar."
+        "warning": "⚠️ Bu sistem tıbbi teşhis koymaz, sadece tahmini risk analizi yapar."
     }
