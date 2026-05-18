@@ -400,104 +400,94 @@
         });
 
         // ✅ GÜNCELLENMİŞ: JSON Validation + Accept Header + Anlamlı Hata Mesajları
-        async function analyzeImage() {
-            const file = imageInput.files[0];
-            if (!file) return;
+async function analyzeImage() {
+    const file = imageInput.files[0];
+    if (!file) return;
 
-            const formData = new FormData();
-            formData.append('image', file);
+    const formData = new FormData();
+    formData.append('image', file);
 
-            analyzeBtn.disabled = true;
-            analyzeBtn.innerHTML = '⏳ Analiz ediliyor...';
-            resultCard.classList.remove('show');
+    analyzeBtn.disabled = true;
+    analyzeBtn.innerHTML = '⏳ Analiz ediliyor...';
+    resultCard.classList.remove('show');
 
-            try {
-                // 1. Resmi yükle, job_id al (JSON beklediğimizi header ile belirt)
-                const uploadResponse = await fetch('/upload', { 
-                    method: 'POST', 
-                    body: formData,
-                    headers: { 'Accept': 'application/json' }
-                });
-                
-                // 🛡️ Response'un JSON olup olmadığını kontrol et (HTML gelirse yakala)
-                const contentType = uploadResponse.headers.get("content-type");
-                if (!contentType || !contentType.includes("application/json")) {
-                    const errorText = await uploadResponse.text();
-                    console.error("Sunucu JSON yerine HTML döndürdü:", errorText.substring(0, 200));
-                    throw new Error(`Sunucu beklenmeyen yanıt verdi: ${uploadResponse.status} ${uploadResponse.statusText}`);
-                }
+    try {
+        const uploadResponse = await fetch('/upload', { 
+            method: 'POST', 
+            body: formData,
+            headers: { 'Accept': 'application/json' }
+        });
+        
+        const contentType = uploadResponse.headers.get("content-type");
+        if (!contentType || !contentType.includes("application/json")) {
+            const errorText = await uploadResponse.text();
+            console.error("Sunucu JSON yerine HTML döndürdü:", errorText.substring(0, 200));
+            throw new Error(`Sunucu beklenmeyen yanıt verdi: ${uploadResponse.status}`);
+        }
 
-                const uploadData = await uploadResponse.json();
-                if (uploadData.error) {
-                    alert('❌ ' + uploadData.error);
-                    return;
-                }
-                
-                const jobId = uploadData.job_id;
-                
-                // 2. Her 2 saniyede bir durumu kontrol et (polling)
-                let attempts = 0;
-                const maxAttempts = 60; // 120 saniye (daha uzun bekleme süresi)
-                
-                while (attempts < maxAttempts) {
-                    await new Promise(resolve => setTimeout(resolve, 2000)); // 2 sn bekle
-                    attempts++;
-                    
-                    analyzeBtn.innerHTML = `⏳ Analiz ediliyor... (${attempts}/${maxAttempts})`;
-                    
-                    const statusResponse = await fetch(`/status/${jobId}`, {
-                        headers: { 'Accept': 'application/json' }
-                    });
-                    
-                    // Status endpoint'i için de JSON kontrolü
-                    const statusContentType = statusResponse.headers.get("content-type");
-                    if (!statusContentType || !statusContentType.includes("application/json")) {
-                        throw new Error("Status endpoint'i JSON döndürmedi");
-                    }
-                    
-                    const statusData = await statusResponse.json();
-                    
-                    if (statusData.status === 'completed') {
-                        // ✅ Başarılı
-                        const result = statusData.result;
-                        document.getElementById('cancerRatio').textContent = `%${result.cancer_ratio}`;
-                        const riskEl = document.getElementById('riskLevel');
-                        riskEl.textContent = result.risk_level.toUpperCase();
-                        riskBox.className = `metric-box risk-${result.risk_level}`;
-                        document.getElementById('patchDetail').textContent = 
-                            `${result.cancer_patches} / ${result.total_patches}`;
-                        resultCard.classList.add('show');
-                        break;
-                        
-                    } else if (statusData.status === 'failed') {
-                        alert('❌ Analiz hatası: ' + (statusData.error || 'Bilinmeyen hata'));
-                        break;
-                        
-                    } else if (statusData.error) {
-                        alert('❌ ' + statusData.error);
-                        break;
-                    }
-                }
-                
-                if (attempts >= maxAttempts) {
-                    alert('⏳ Analiz zaman aşımına uğradı. Lütfen daha küçük bir görsel deneyin veya tekrar deneyin.');
-                }
-                
-            } catch (err) {
-                console.error("Frontend hatası:", err);
-                // Kullanıcı dostu mesajlar
-                if (err.message.includes("Unexpected token") || err.message.includes("JSON")) {
-                    alert('⚠️ Sunucu beklenmeyen bir yanıt döndürdü. Lütfen sayfayı yenileyip tekrar deneyin.\n\n(Detay: ' + err.message.substring(0, 100) + '...)');
-                } else if (err.message.includes("Failed to fetch") || err.message.includes("NetworkError")) {
-                    alert('🌐 Bağlantı hatası. İnternetinizi kontrol edin veya Render sunucusu meşgul olabilir.');
-                } else {
-                    alert('❌ ' + err.message);
-                }
-            } finally {
-                analyzeBtn.disabled = false;
-                analyzeBtn.innerHTML = '🔍 Analiz Et';
+        const uploadData = await uploadResponse.json();
+        if (uploadData.error) {
+            // 🔍 Daha detaylı hata mesajı
+            if (uploadData.error.includes("okunamadı") || uploadData.error.includes("histopatoloji")) {
+                alert('⚠️ Yüklenen görsel analiz edilemedi.\n\n• Lütfen .jpg/.png formatında bir histopatoloji doku görseli seçin.\n• Görsel bozuk veya çok küçük olabilir.\n• Farklı bir görsel deneyin.');
+            } else {
+                alert('❌ ' + uploadData.error);
+            }
+            return;
+        }
+        
+        const jobId = uploadData.job_id;
+        let attempts = 0;
+        const maxAttempts = 60;
+        
+        while (attempts < maxAttempts) {
+            await new Promise(resolve => setTimeout(resolve, 2000));
+            attempts++;
+            analyzeBtn.innerHTML = `⏳ Analiz ediliyor... (${attempts}/${maxAttempts})`;
+            
+            const statusResponse = await fetch(`/status/${jobId}`, {
+                headers: { 'Accept': 'application/json' }
+            });
+            const statusContentType = statusResponse.headers.get("content-type");
+            if (!statusContentType || !statusContentType.includes("application/json")) {
+                throw new Error("Status endpoint'i JSON döndürmedi");
+            }
+            
+            const statusData = await statusResponse.json();
+            if (statusData.status === 'completed') {
+                const result = statusData.result;
+                document.getElementById('cancerRatio').textContent = `%${result.cancer_ratio}`;
+                const riskEl = document.getElementById('riskLevel');
+                riskEl.textContent = result.risk_level.toUpperCase();
+                riskBox.className = `metric-box risk-${result.risk_level}`;
+                document.getElementById('patchDetail').textContent = `${result.cancer_patches} / ${result.total_patches}`;
+                resultCard.classList.add('show');
+                break;
+            } else if (statusData.status === 'failed') {
+                alert('❌ Analiz hatası: ' + (statusData.error || 'Bilinmeyen hata'));
+                break;
+            } else if (statusData.error) {
+                alert('❌ ' + statusData.error);
+                break;
             }
         }
+        if (attempts >= maxAttempts) {
+            alert('⏳ Analiz zaman aşımına uğradı. Lütfen daha küçük bir görsel deneyin veya tekrar deneyin.');
+        }
+    } catch (err) {
+        console.error("Frontend hatası:", err);
+        if (err.message.includes("Unexpected token") || err.message.includes("JSON")) {
+            alert('⚠️ Sunucu beklenmeyen bir yanıt döndürdü. Lütfen sayfayı yenileyip tekrar deneyin.');
+        } else if (err.message.includes("Failed to fetch") || err.message.includes("NetworkError")) {
+            alert('🌐 Bağlantı hatası. İnternetinizi kontrol edin veya Render sunucusu meşgul olabilir.');
+        } else {
+            alert('❌ ' + err.message);
+        }
+    } finally {
+        analyzeBtn.disabled = false;
+        analyzeBtn.innerHTML = '🔍 Analiz Et';
+    }
+}
     </script>
 </body>
 </html>

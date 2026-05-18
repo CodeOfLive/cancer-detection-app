@@ -1,6 +1,6 @@
 import os, uuid, traceback, threading, time, json
 from datetime import datetime
-from flask import Flask, request, jsonify, render_template, redirect, url_for, flash, session, make_response
+from flask import Flask, request, jsonify, render_template, redirect, url_for, flash, session
 from flask_sqlalchemy import SQLAlchemy
 from flask_admin import Admin, AdminIndexView, expose
 from flask_admin.contrib.sqla import ModelView
@@ -8,7 +8,8 @@ from flask_talisman import Talisman
 from flask_wtf import CSRFProtect
 from werkzeug.security import generate_password_hash, check_password_hash
 from pathlib import Path
-from PIL import Image, ImageStat
+import cv2  # ✅ OpenCV ile daha robust dosya okuma
+import numpy as np
 
 app = Flask(__name__)
 app.config["MAX_CONTENT_LENGTH"] = 32 * 1024 * 1024
@@ -43,7 +44,6 @@ Talisman(app, force_https=False, content_security_policy=csp)
 
 # 🛡️ CSRF Koruması
 csrf = CSRFProtect(app)
-
 db = SQLAlchemy(app)
 
 # ️ MODELLER
@@ -54,10 +54,8 @@ class AdminUser(db.Model):
     password_hash = db.Column(db.String(256), nullable=False)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     is_active = db.Column(db.Boolean, default=True)
-
     def set_password(self, password):
         self.password_hash = generate_password_hash(password)
-
     def check_password(self, password):
         return check_password_hash(self.password_hash, password)
 
@@ -92,14 +90,12 @@ class SecureAdminIndexView(AdminIndexView):
         if not session.get("admin_logged_in"):
             return redirect(url_for(".login"))
         return super().index()
-
     @expose("/login", methods=["GET", "POST"])
     def login(self):
         if request.method == "POST":
             username = request.form.get("username")
             password = request.form.get("password")
             user = AdminUser.query.filter_by(username=username).first()
-
             if user and user.check_password(password) and user.is_active:
                 session["admin_logged_in"] = True
                 session["admin_user"] = user.username
@@ -109,13 +105,12 @@ class SecureAdminIndexView(AdminIndexView):
                     db.session.commit()
                 except Exception as e:
                     db.session.rollback()
-                    print(f"⚠️ Audit log kaydı başarısız: {e}")
+                    print(f"⚠️ Audit log hatası: {e}")
                 flash("Giriş başarılı.", "success")
                 return redirect(url_for(".index"))
             else:
                 flash("Geçersiz kullanıcı adı veya şifre.", "error")
         return self.render("admin/login.html")
-
     @expose("/logout")
     def logout(self):
         session.pop("admin_logged_in", None)
@@ -132,7 +127,62 @@ class UploadModelView(ModelView):
 admin = Admin(app, name="Histopathology Admin", template_mode="bootstrap4", index_view=SecureAdminIndexView())
 admin.add_view(UploadModelView(ImageUpload, db.session, name="Görüntü Analizleri"))
 
-# 🛡️ YARDIMCI FONKSİYONLAR
+# 🛡️ ROBUST YARDIMCI FONKSİYONLAR
+def safe_read_image(image_path, max_retries=3):
+    """
+    OpenCV ile robust görüntü okuma + retry mantığı
+    """
+    for attempt in range(max_retries):
+        try:
+            if not os.path.exists(image_path):
+                print(f"⚠️ Dosya bulunamadı (deneme {attempt+1}): {image_path}")
+                time.sleep(0.1 * (attempt + 1))  # Exponential backoff
+                continue
+            
+            if os.path.getsize(image_path) == 0:
+                print(f"⚠️ Dosya boş (deneme {attempt+1}): {image_path}")
+                time.sleep(0.1 * (attempt + 1))
+                continue
+                
+            img = cv2.imread(str(image_path))
+            if img is None:
+                print(f"⚠️ OpenCV okuma başarısız (deneme {attempt+1}): {image_path}")
+                time.sleep(0.1 * (attempt + 1))
+                continue
+                
+            # BGR → RGB dönüşümü
+            img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+            return img, None  # (image, error)
+            
+        except Exception as e:
+            print(f"⚠️ safe_read_image hatası (deneme {attempt+1}): {e}")
+            if attempt == max_retries - 1:
+                return None, f"Görüntü okunamadı: {str(e)}"
+            time.sleep(0.1 * (attempt + 1))
+    return None, "Görüntü okunamadı: Maksimum deneme aşıldı"
+
+def is_likely_histopathology(image_array):
+    """
+    OpenCV array üzerinden H&E doku analizi
+    """
+    try:
+        # HSV'ye çevir (OpenCV BGR kullanır, zaten RGB'ye çevirdik)
+        img_hsv = cv2.cvtColor(image_array, cv2.COLOR_RGB2HSV)
+        h, s, v = cv2.split(img_hsv)
+        
+        avg_hue = np.mean(h)
+        avg_sat = np.mean(s)
+        sat_std = np.std(s)
+        
+        # H&E heuristic: Pembe/Mor tonları, orta saturation, doku varyansı
+        if avg_sat > 80 or avg_hue < 100 or avg_hue > 180:
+            return False, "Görsel histopatoloji dokusu ile uyumlu değil."
+        if sat_std < 15:
+            return False, "Görsel yeterli doku detayı içermiyor."
+        return True, ""
+    except Exception as e:
+        return False, f"Doku analizi hatası: {str(e)}"
+
 def log_audit(action, details=""):
     try:
         log = AuditLog(action=action, details=details, ip_address=request.remote_addr)
@@ -141,26 +191,11 @@ def log_audit(action, details=""):
     except Exception:
         db.session.rollback()
 
-def is_likely_histopathology(image_path):
-    try:
-        img = Image.open(str(image_path)).convert("HSV")
-        stat = ImageStat.Stat(img)
-        h, s, v = stat.mean, stat.stddev
-        avg_hue, avg_sat = h[0], s[0]
-        if avg_sat > 80 or avg_hue < 100 or avg_hue > 180:
-            return False, "Görsel histopatoloji dokusu ile uyumlu değil."
-        if v[1] < 15:
-            return False, "Görsel yeterli doku detayı içermiyor."
-        return True, ""
-    except Exception:
-        return False, "Görsel okunamadı."
-
-# 🌐 API ROUTES
+# 🌐 ROUTES
 @app.route("/")
 def home():
     return render_template("index.html")
 
-# ✅ CSRF'den exempt et: @csrf.exempt
 @app.route("/upload", methods=["POST"])
 @csrf.exempt
 def upload_image():
@@ -177,11 +212,25 @@ def upload_image():
         job_id = str(uuid.uuid4())
         filename = f"{job_id}{ext}"
         save_path = UPLOAD_FOLDER / filename
-        file.save(save_path)
+        
+        # Dosyayı kaydet ve flush ile diske yazdır
+        file.save(str(save_path))
+        if hasattr(os, 'fsync'):
+            with open(save_path, 'rb') as f:
+                os.fsync(f.fileno())
+        
+        # ✅ Robust okuma
+        img, error = safe_read_image(save_path)
+        if error or img is None:
+            if os.path.exists(save_path):
+                os.remove(save_path)
+            return jsonify({"error": error or "Görüntü okunamadı"}), 400
 
-        is_valid, reason = is_likely_histopathology(save_path)
+        # ✅ Doku kontrolü (array üzerinden)
+        is_valid, reason = is_likely_histopathology(img)
         if not is_valid:
-            os.remove(save_path)
+            if os.path.exists(save_path):
+                os.remove(save_path)
             return jsonify({"error": reason}), 400
 
         jobs[job_id] = {
@@ -196,9 +245,14 @@ def upload_image():
             try:
                 start_ms = time.time()
                 from predict import predict_image_patches
-                result = predict_image_patches(save_path)
+                # Array'yi geçici dosya olarak kaydedip predict'e gönder (mevcut pipeline ile uyumlu)
+                temp_path = BASE_DIR / "static" / "uploads" / f"temp_{job_id}{ext}"
+                cv2.imwrite(str(temp_path), cv2.cvtColor(img, cv2.COLOR_RGB2BGR))
+                result = predict_image_patches(temp_path)
+                if os.path.exists(temp_path):
+                    os.remove(temp_path)
+                    
                 elapsed_ms = int((time.time() - start_ms) * 1000)
-
                 job["result"] = result
                 job["status"] = "completed"
 
@@ -232,7 +286,6 @@ def upload_image():
         traceback.print_exc()
         return jsonify({"error": f"Sunucu hatası: {str(e)}"}), 500
 
-# ✅ CSRF'den exempt et: @csrf.exempt
 @app.route("/status/<job_id>", methods=["GET"])
 @csrf.exempt
 def get_status(job_id):

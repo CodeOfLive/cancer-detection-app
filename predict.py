@@ -1,6 +1,5 @@
-import os, time, numpy as np, tensorflow as tf
+import os, time, numpy as np, tensorflow as tf, cv2
 from pathlib import Path
-from PIL import Image  # Keras utils yerine PIL kullanıyoruz
 
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'
 tf.config.set_visible_devices([], 'GPU')
@@ -20,49 +19,66 @@ def get_model():
         print("✅ Model hazır!")
     return _model
 
+def safe_load_image(image_path, max_retries=3):
+    """
+    OpenCV ile robust görüntü yükleme
+    """
+    for attempt in range(max_retries):
+        try:
+            if not os.path.exists(image_path):
+                print(f"⚠️ predict.py: Dosya yok (deneme {attempt+1}): {image_path}")
+                time.sleep(0.1 * (attempt + 1))
+                continue
+            img = cv2.imread(str(image_path))
+            if img is None:
+                print(f"⚠️ predict.py: OpenCV okuma başarısız (deneme {attempt+1})")
+                time.sleep(0.1 * (attempt + 1))
+                continue
+            return cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+        except Exception as e:
+            print(f"⚠️ predict.py safe_load_image hatası: {e}")
+            if attempt == max_retries - 1:
+                raise
+            time.sleep(0.1 * (attempt + 1))
+    raise ValueError("Görüntü yüklenemedi")
+
 def predict_image_patches(image_path, threshold=0.8):
     model = get_model()
     start = time.time()
     
-    try:
-        # PIL ile aç & thumbnail ile yerinde küçült (RAM şişmesini önler)
-        img = Image.open(str(image_path)).convert("RGB")
-        img.thumbnail((672, 672), Image.Resampling.LANCZOS)
-        img_array = np.array(img, dtype=np.float32)
-    except Exception as e:
-        raise ValueError(f"Görüntü okunamadı veya format desteklenmiyor: {e}")
-
-    h, w, _ = img_array.shape
+    # ✅ Robust yükleme
+    img = safe_load_image(image_path)
+    h, w, _ = img.shape
     
-    # Patch boyutundan küçükse 224x224'e sabitle
+    # Otomatik küçültme (max 672px → 3x3=9 patch)
+    max_dim = 672
+    if max(h, w) > max_dim:
+        scale = max_dim / max(h, w)
+        img = cv2.resize(img, (int(w*scale), int(h*scale)), interpolation=cv2.INTER_AREA)
+        h, w = img.shape[:2]
+    
     if h < PATCH_SIZE or w < PATCH_SIZE:
-        img = img.resize((IMG_SIZE, IMG_SIZE), Image.Resampling.LANCZOS)
-        img_array = np.array(img, dtype=np.float32)
+        img = cv2.resize(img, (IMG_SIZE, IMG_SIZE))
         h, w = IMG_SIZE, IMG_SIZE
 
     cancer_count, total_patches = 0, 0
-    
     for y in range(0, h - PATCH_SIZE + 1, PATCH_SIZE):
         for x in range(0, w - PATCH_SIZE + 1, PATCH_SIZE):
             if total_patches >= MAX_PATCHES: break
-            
-            patch = img_array[y:y+PATCH_SIZE, x:x+PATCH_SIZE]
+            patch = img[y:y+PATCH_SIZE, x:x+PATCH_SIZE]
+            patch = patch.astype("float32")  # Model Rescaling katmanı var
             patch = np.expand_dims(patch, axis=0)
-            
             pred = model.predict(patch, verbose=0)[0][0]
-            cancer_prob = 1.0 - pred
-            
+            cancer_prob = 1.0 - pred  # colon_aca=0, colon_n=1
             if cancer_prob > threshold:
                 cancer_count += 1
             total_patches += 1
-            
         if total_patches >= MAX_PATCHES: break
 
     ratio = (cancer_count / total_patches * 100) if total_patches > 0 else 0
     risk = "düşük" if ratio < 30 else ("orta" if ratio < 70 else "yüksek")
     
     print(f"✅ {time.time()-start:.1f}s | {total_patches} patch | %{ratio} {risk}")
-    
     return {
         "cancer_ratio": round(ratio, 2),
         "risk_level": risk,
