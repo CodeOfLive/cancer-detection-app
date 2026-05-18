@@ -1,6 +1,6 @@
-import os, uuid, traceback, threading, time, json
+import os, uuid, traceback, threading, time, json, csv, io
 from datetime import datetime
-from flask import Flask, request, jsonify, render_template, redirect, url_for, flash, session
+from flask import Flask, request, jsonify, render_template, redirect, url_for, flash, session, Response
 from flask_sqlalchemy import SQLAlchemy
 from flask_admin import Admin, AdminIndexView, expose
 from flask_admin.contrib.sqla import ModelView
@@ -74,6 +74,12 @@ class ImageUpload(db.Model):
     cancer_patches = db.Column(db.Integer)
     processing_time_ms = db.Column(db.Integer)
     status = db.Column(db.String(20), default="completed")
+    
+    # ✅ YENİ SÜTUNLAR
+    image_dimensions = db.Column(db.String(20))  # "1024x768" formatında
+    confidence_score = db.Column(db.Float)  # 0-1 arası model güven skoru
+    patch_details = db.Column(db.Text)  # JSON string: her patch'in skoru
+    reviewed_by = db.Column(db.String(50))  # İnceleyen uzman adı
 
 class AuditLog(db.Model):
     __tablename__ = "audit_logs"
@@ -220,7 +226,6 @@ def upload_image():
         }
 
         def process_in_background(data):
-            # 🔑 KRİTİK: Arka plan thread'i için Flask uygulama bağlamını oluştur
             with app.app_context():
                 job = jobs[data["job_id"]]
                 upload_record = None
@@ -228,7 +233,6 @@ def upload_image():
                     start_ms = time.time()
                     from predict import predict_image_patches
                     
-                    # Geçici dosyayı thread içinde oluştur (yol çakışmasını önler)
                     temp_path = UPLOAD_FOLDER / f"temp_{data['job_id']}{Path(data['filename']).suffix}"
                     cv2.imwrite(str(temp_path), cv2.cvtColor(img, cv2.COLOR_RGB2BGR))
                     
@@ -239,12 +243,21 @@ def upload_image():
                     job["result"] = result
                     job["status"] = "completed"
 
+                    # ✅ Yeni sütunları da kaydet
+                    h, w, _ = img.shape
+                    avg_confidence = 1.0 - result["cancer_ratio"] / 100.0
+                    
                     upload_record = ImageUpload(
                         filename=data["filename"], original_name=data["original_name"],
                         file_size_kb=data["file_size_kb"], mime_type=data["mime_type"],
                         ip_address=data["ip_address"], risk_level=result["risk_level"],
                         cancer_ratio=result["cancer_ratio"], total_patches=result["total_patches"],
-                        cancer_patches=result["cancer_patches"], processing_time_ms=elapsed_ms, status="completed"
+                        cancer_patches=result["cancer_patches"], processing_time_ms=elapsed_ms, 
+                        status="completed",
+                        image_dimensions=f"{w}x{h}",
+                        confidence_score=round(avg_confidence, 3),
+                        patch_details=json.dumps({"cancer_patches": result["cancer_patches"], "total": result["total_patches"]}),
+                        reviewed_by=None
                     )
                     db.session.add(upload_record)
                     db.session.flush()
@@ -258,7 +271,7 @@ def upload_image():
                     job["status"] = "failed"
                     if upload_record:
                         upload_record.status = "failed"
-                    db.session.rollback() # 🔑 Bağlam kopması durumunda session'ı temizle
+                    db.session.rollback()
                     log_audit("UPLOAD_FAILED", str(e), ip_address=data["ip_address"])
                     print(f"❌ Job {data['job_id']} hatası: {e}")
                     traceback.print_exc()
@@ -281,6 +294,62 @@ def get_status(job_id):
         return jsonify({"status": job["status"], "result": job["result"], "error": job["error"]})
     except Exception as e:
         return jsonify({"error": f"Status hatası: {str(e)}"}), 500
+
+# ✅ CSV EXPORT ENDPOINT
+@app.route("/admin/export/csv")
+@csrf.exempt
+def export_csv():
+    """Tüm analizleri CSV olarak dışa aktar"""
+    if not session.get("admin_logged_in"):
+        return jsonify({"error": "Unauthorized"}), 401
+    
+    uploads = ImageUpload.query.all()
+    output = io.StringIO()
+    writer = csv.writer(output)
+    
+    writer.writerow([
+        "ID", "Orijinal İsim", "Risk Seviyesi", "Kanser Oranı", 
+        "Boyut", "Güven Skoru", "Patch Detayı", "İnceleyen", 
+        "Yüklenme Tarihi", "Durum"
+    ])
+    
+    for u in uploads:
+        writer.writerow([
+            u.id, u.original_name, u.risk_level, f"%{u.cancer_ratio}",
+            u.image_dimensions or "N/A", u.confidence_score if u.confidence_score else "N/A",
+            u.patch_details or "N/A", u.reviewed_by or "N/A",
+            u.uploaded_at.strftime("%d.%m.%Y %H:%M"), u.status
+        ])
+    
+    return Response(
+        output.getvalue(),
+        mimetype="text/csv; charset=utf-8",
+        headers={"Content-Disposition": f"attachment;filename=analizler_{datetime.now().strftime('%Y%m%d')}.csv"}
+    )
+
+# ✅ MODERN DASHBOARD ROUTE
+@app.route("/dashboard")
+@csrf.exempt
+def dashboard():
+    """Modern admin dashboard"""
+    if not session.get("admin_logged_in"):
+        return redirect(url_for("admin.login"))
+    
+    total = ImageUpload.query.count()
+    high_risk = ImageUpload.query.filter_by(risk_level="yüksek").count()
+    medium_risk = ImageUpload.query.filter_by(risk_level="orta").count()
+    low_risk = ImageUpload.query.filter_by(risk_level="düşük").count()
+    today = ImageUpload.query.filter(
+        db.func.date(ImageUpload.uploaded_at) == datetime.utcnow().date()
+    ).count()
+    
+    recent = ImageUpload.query.order_by(ImageUpload.uploaded_at.desc()).limit(10).all()
+    
+    return render_template("dashboard.html", 
+                          stats={"total": total, "high_risk": high_risk, 
+                               "medium_risk": medium_risk, "low_risk": low_risk, 
+                               "today": today},
+                          recent=recent)
 
 # ⚠️ HATA YÖNETİCİLERİ
 @app.errorhandler(500)

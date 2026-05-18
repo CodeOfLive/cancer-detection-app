@@ -1,0 +1,119 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Dashboard - Histopathology Admin</title>
+    <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+</head>
+<body class="bg-gray-100">
+    <div class="flex h-screen">
+        <!-- Sidebar -->
+        <aside class="w-64 bg-gray-900 text-white flex-shrink-0">
+            <div class="p-6">
+                <h1 class="text-2xl font-bold">🔬 Admin Panel</h1>
+            </div>
+            <nav class="mt-6">
+                <a href="/dashboard" class="block py-3 px-6 bg-gray-800 border-l-4 border-blue-500">📊 Dashboard</a>
+                <a href="/admin/" class="block py-3 px-6 hover:bg-gray-800">📋 Tüm Analizler</a>
+                <a href="/admin/export/csv" class="block py-3 px-6 hover:bg-gray-800">📥 CSV İndir</a>
+                <a href="/" class="block py-3 px-6 hover:bg-gray-800">🏠 Ana Sayfa</a>
+                <a href="/admin/logout" class="block py-3 px-6 hover:bg-red-700">🚪 Çıkış</a>
+            </nav>
+        </aside>
+
+        <!-- Main Content -->
+        <main class="flex-1 overflow-y-auto p-8">
+            <h2 class="text-3xl font-bold mb-8 text-gray-800">Dashboard</h2>
+            
+            <!-- Stats Cards -->
+            <div class="grid grid-cols-1 md:grid-cols-4 gap-6 mb-8">
+                <div class="bg-white rounded-lg shadow p-6">
+                    <div class="text-gray-500 text-sm">Toplam Analiz</div>
+                    <div class="text-3xl font-bold text-gray-800">{{ stats.total }}</div>
+                </div>
+                <div class="bg-white rounded-lg shadow p-6">
+                    <div class="text-gray-500 text-sm">Yüksek Risk</div>
+                    <div class="text-3xl font-bold text-red-600">{{ stats.high_risk }}</div>
+                </div>
+                <div class="bg-white rounded-lg shadow p-6">
+                    <div class="text-gray-500 text-sm">Bugün</div>
+                    <div class="text-3xl font-bold text-blue-600">{{ stats.today }}</div>
+                </div>
+                <div class="bg-white rounded-lg shadow p-6">
+                    <div class="text-gray-500 text-sm">Ortalama Risk</div>
+                    <div class="text-3xl font-bold text-green-600">
+                        {{ "%.1f"|format((stats.high_risk * 3 + stats.medium_risk * 2 + stats.low_risk) / (stats.total or 1)) }}
+                    </div>
+                </div>
+            </div>
+
+            <!-- Chart -->
+            <div class="bg-white rounded-lg shadow p-6 mb-8">
+                <h2 class="text-xl font-bold mb-4">Risk Dağılımı</h2>
+                <canvas id="riskChart" height="200"></canvas>
+            </div>
+
+            <!-- Recent Analyses Table -->
+            <div class="bg-white rounded-lg shadow overflow-hidden">
+                <div class="px-6 py-4 border-b">
+                    <h2 class="text-xl font-bold">Son 10 Analiz</h2>
+                </div>
+                <div class="overflow-x-auto">
+                    <table class="min-w-full">
+                        <thead class="bg-gray-50">
+                            <tr>
+                                <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">ID</th>
+                                <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Dosya</th>
+                                <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Boyut</th>
+                                <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Risk</th>
+                                <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Oran</th>
+                                <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Güven</th>
+                                <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">İnceleyen</th>
+                                <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Tarih</th>
+                            </tr>
+                        </thead>
+                        <tbody class="divide-y divide-gray-200">
+                            {% for upload in recent %}
+                            <tr class="hover:bg-gray-50">
+                                <td class="px-6 py-4">{{ upload.id }}</td>
+                                <td class="px-6 py-4 max-w-xs truncate">{{ upload.original_name }}</td>
+                                <td class="px-6 py-4 text-sm text-gray-600">{{ upload.image_dimensions or 'N/A' }}</td>
+                                <td class="px-6 py-4">
+                                    <span class="px-2 py-1 rounded-full text-xs font-semibold
+                                        {% if upload.risk_level == 'yüksek' %}bg-red-100 text-red-800
+                                        {% elif upload.risk_level == 'orta' %}bg-yellow-100 text-yellow-800
+                                        {% else %}bg-green-100 text-green-800{% endif %}">
+                                        {{ upload.risk_level.upper() }}
+                                    </span>
+                                </td>
+                                <td class="px-6 py-4">%{{ upload.cancer_ratio }}</td>
+                                <td class="px-6 py-4">{{ "%.1f"|format(upload.confidence_score * 100) if upload.confidence_score else 'N/A' }}%</td>
+                                <td class="px-6 py-4 text-sm">{{ upload.reviewed_by or '-' }}</td>
+                                <td class="px-6 py-4 text-sm text-gray-600">{{ upload.uploaded_at.strftime('%d.%m.%Y %H:%M') }}</td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </main>
+    </div>
+
+    <script>
+        const ctx = document.getElementById('riskChart').getContext('2d');
+        new Chart(ctx, {
+            type: 'doughnut',
+            data: {
+                labels: ['Yüksek Risk', 'Orta Risk', 'Düşük Risk'],
+                datasets: [{
+                    data: [{{ stats.high_risk }}, {{ stats.medium_risk }}, {{ stats.low_risk }}],
+                    backgroundColor: ['#ef4444', '#f59e0b', '#10b981']
+                }]
+            },
+            options: { responsive: true, maintainAspectRatio: false }
+        });
+    </script>
+</body>
+</html>
