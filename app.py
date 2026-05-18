@@ -8,7 +8,7 @@ from flask_talisman import Talisman
 from flask_wtf import CSRFProtect
 from werkzeug.security import generate_password_hash, check_password_hash
 from pathlib import Path
-import cv2  # ✅ OpenCV ile daha robust dosya okuma
+import cv2
 import numpy as np
 
 app = Flask(__name__)
@@ -127,54 +127,42 @@ class UploadModelView(ModelView):
 admin = Admin(app, name="Histopathology Admin", template_mode="bootstrap4", index_view=SecureAdminIndexView())
 admin.add_view(UploadModelView(ImageUpload, db.session, name="Görüntü Analizleri"))
 
-# 🛡️ ROBUST YARDIMCI FONKSİYONLAR
+# 🛡️ YARDIMCI FONKSİYONLAR
+def log_audit(action, details="", ip_address=None):
+    """Thread-safe audit logging"""
+    try:
+        log = AuditLog(action=action, details=details, ip_address=ip_address or "system")
+        db.session.add(log)
+        db.session.commit()
+    except Exception:
+        db.session.rollback()
+
 def safe_read_image(image_path, max_retries=3):
-    """
-    OpenCV ile robust görüntü okuma + retry mantığı
-    """
     for attempt in range(max_retries):
         try:
             if not os.path.exists(image_path):
-                print(f"⚠️ Dosya bulunamadı (deneme {attempt+1}): {image_path}")
-                time.sleep(0.1 * (attempt + 1))  # Exponential backoff
-                continue
-            
-            if os.path.getsize(image_path) == 0:
-                print(f"⚠️ Dosya boş (deneme {attempt+1}): {image_path}")
                 time.sleep(0.1 * (attempt + 1))
                 continue
-                
+            if os.path.getsize(image_path) == 0:
+                time.sleep(0.1 * (attempt + 1))
+                continue
             img = cv2.imread(str(image_path))
             if img is None:
-                print(f"⚠️ OpenCV okuma başarısız (deneme {attempt+1}): {image_path}")
                 time.sleep(0.1 * (attempt + 1))
                 continue
-                
-            # BGR → RGB dönüşümü
-            img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
-            return img, None  # (image, error)
-            
+            return cv2.cvtColor(img, cv2.COLOR_BGR2RGB), None
         except Exception as e:
-            print(f"⚠️ safe_read_image hatası (deneme {attempt+1}): {e}")
             if attempt == max_retries - 1:
                 return None, f"Görüntü okunamadı: {str(e)}"
             time.sleep(0.1 * (attempt + 1))
     return None, "Görüntü okunamadı: Maksimum deneme aşıldı"
 
 def is_likely_histopathology(image_array):
-    """
-    OpenCV array üzerinden H&E doku analizi
-    """
     try:
-        # HSV'ye çevir (OpenCV BGR kullanır, zaten RGB'ye çevirdik)
         img_hsv = cv2.cvtColor(image_array, cv2.COLOR_RGB2HSV)
         h, s, v = cv2.split(img_hsv)
-        
-        avg_hue = np.mean(h)
-        avg_sat = np.mean(s)
+        avg_hue, avg_sat = np.mean(h), np.mean(s)
         sat_std = np.std(s)
-        
-        # H&E heuristic: Pembe/Mor tonları, orta saturation, doku varyansı
         if avg_sat > 80 or avg_hue < 100 or avg_hue > 180:
             return False, "Görsel histopatoloji dokusu ile uyumlu değil."
         if sat_std < 15:
@@ -182,14 +170,6 @@ def is_likely_histopathology(image_array):
         return True, ""
     except Exception as e:
         return False, f"Doku analizi hatası: {str(e)}"
-
-def log_audit(action, details=""):
-    try:
-        log = AuditLog(action=action, details=details, ip_address=request.remote_addr)
-        db.session.add(log)
-        db.session.commit()
-    except Exception:
-        db.session.rollback()
 
 # 🌐 ROUTES
 @app.route("/")
@@ -213,72 +193,77 @@ def upload_image():
         filename = f"{job_id}{ext}"
         save_path = UPLOAD_FOLDER / filename
         
-        # Dosyayı kaydet ve flush ile diske yazdır
         file.save(str(save_path))
         if hasattr(os, 'fsync'):
-            with open(save_path, 'rb') as f:
-                os.fsync(f.fileno())
+            with open(save_path, 'rb') as f: os.fsync(f.fileno())
         
-        # ✅ Robust okuma
         img, error = safe_read_image(save_path)
         if error or img is None:
-            if os.path.exists(save_path):
-                os.remove(save_path)
+            if os.path.exists(save_path): os.remove(save_path)
             return jsonify({"error": error or "Görüntü okunamadı"}), 400
 
-        # ✅ Doku kontrolü (array üzerinden)
         is_valid, reason = is_likely_histopathology(img)
         if not is_valid:
-            if os.path.exists(save_path):
-                os.remove(save_path)
+            if os.path.exists(save_path): os.remove(save_path)
             return jsonify({"error": reason}), 400
 
-        jobs[job_id] = {
-            "status": "processing", "created_at": datetime.now(), "result": None, "error": None,
+        # Thread'e aktarılacak veriler
+        thread_data = {
+            "job_id": job_id, "filename": filename, "save_path": save_path,
             "original_name": file.filename, "file_size_kb": os.path.getsize(save_path) // 1024,
             "mime_type": file.content_type, "ip_address": request.remote_addr
         }
 
-        def process_in_background():
-            job = jobs[job_id]
-            upload_record = None
-            try:
-                start_ms = time.time()
-                from predict import predict_image_patches
-                # Array'yi geçici dosya olarak kaydedip predict'e gönder (mevcut pipeline ile uyumlu)
-                temp_path = BASE_DIR / "static" / "uploads" / f"temp_{job_id}{ext}"
-                cv2.imwrite(str(temp_path), cv2.cvtColor(img, cv2.COLOR_RGB2BGR))
-                result = predict_image_patches(temp_path)
-                if os.path.exists(temp_path):
-                    os.remove(temp_path)
+        jobs[job_id] = {
+            "status": "processing", "created_at": datetime.now(), "result": None, "error": None,
+            **{k: v for k, v in thread_data.items() if k != "save_path"}
+        }
+
+        def process_in_background(data):
+            # 🔑 KRİTİK: Arka plan thread'i için Flask uygulama bağlamını oluştur
+            with app.app_context():
+                job = jobs[data["job_id"]]
+                upload_record = None
+                try:
+                    start_ms = time.time()
+                    from predict import predict_image_patches
                     
-                elapsed_ms = int((time.time() - start_ms) * 1000)
-                job["result"] = result
-                job["status"] = "completed"
+                    # Geçici dosyayı thread içinde oluştur (yol çakışmasını önler)
+                    temp_path = UPLOAD_FOLDER / f"temp_{data['job_id']}{Path(data['filename']).suffix}"
+                    cv2.imwrite(str(temp_path), cv2.cvtColor(img, cv2.COLOR_RGB2BGR))
+                    
+                    result = predict_image_patches(str(temp_path))
+                    if os.path.exists(temp_path): os.remove(temp_path)
+                    
+                    elapsed_ms = int((time.time() - start_ms) * 1000)
+                    job["result"] = result
+                    job["status"] = "completed"
 
-                upload_record = ImageUpload(
-                    filename=filename, original_name=job["original_name"],
-                    file_size_kb=job["file_size_kb"], mime_type=job["mime_type"],
-                    ip_address=job["ip_address"], risk_level=result["risk_level"],
-                    cancer_ratio=result["cancer_ratio"], total_patches=result["total_patches"],
-                    cancer_patches=result["cancer_patches"], processing_time_ms=elapsed_ms, status="completed"
-                )
-                db.session.add(upload_record)
-                db.session.flush()
-                log_audit("UPLOAD_ANALYZED", f"ID:{upload_record.id} Risk:{result['risk_level']}")
-                db.session.commit()
-                print(f"✅ Job {job_id} DB'ye kaydedildi!")
-            except Exception as e:
-                job["error"] = str(e)
-                job["status"] = "failed"
-                if upload_record:
-                    upload_record.status = "failed"
+                    upload_record = ImageUpload(
+                        filename=data["filename"], original_name=data["original_name"],
+                        file_size_kb=data["file_size_kb"], mime_type=data["mime_type"],
+                        ip_address=data["ip_address"], risk_level=result["risk_level"],
+                        cancer_ratio=result["cancer_ratio"], total_patches=result["total_patches"],
+                        cancer_patches=result["cancer_patches"], processing_time_ms=elapsed_ms, status="completed"
+                    )
+                    db.session.add(upload_record)
+                    db.session.flush()
+                    
+                    log_audit("UPLOAD_ANALYZED", f"ID:{upload_record.id} Risk:{result['risk_level']}", ip_address=data["ip_address"])
                     db.session.commit()
-                log_audit("UPLOAD_FAILED", str(e))
-                print(f"❌ Job {job_id} hatası: {e}")
-                traceback.print_exc()
+                    print(f"✅ Job {data['job_id']} DB'ye kaydedildi!")
+                    
+                except Exception as e:
+                    job["error"] = str(e)
+                    job["status"] = "failed"
+                    if upload_record:
+                        upload_record.status = "failed"
+                    db.session.rollback() # 🔑 Bağlam kopması durumunda session'ı temizle
+                    log_audit("UPLOAD_FAILED", str(e), ip_address=data["ip_address"])
+                    print(f"❌ Job {data['job_id']} hatası: {e}")
+                    traceback.print_exc()
 
-        threading.Thread(target=process_in_background, daemon=True).start()
+        threading.Thread(target=process_in_background, args=(thread_data,), daemon=True).start()
         return jsonify({"job_id": job_id})
     
     except Exception as e:
