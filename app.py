@@ -1,11 +1,11 @@
-import os, uuid, traceback, threading, time
+import os, uuid, traceback, threading, time, json
 from datetime import datetime
-from flask import Flask, request, jsonify, render_template, redirect, url_for, flash, session
+from flask import Flask, request, jsonify, render_template, redirect, url_for, flash, session, make_response
 from flask_sqlalchemy import SQLAlchemy
 from flask_admin import Admin, AdminIndexView, expose
 from flask_admin.contrib.sqla import ModelView
 from flask_talisman import Talisman
-from flask_wtf import CSRFProtect  # ✅ Sadece CSRFProtect import et, csrf_exempt YOK
+from flask_wtf import CSRFProtect
 from werkzeug.security import generate_password_hash, check_password_hash
 from pathlib import Path
 from PIL import Image, ImageStat
@@ -41,7 +41,7 @@ csp = {
 }
 Talisman(app, force_https=False, content_security_policy=csp)
 
-# 🛡️ CSRF Koruması (Sadece Protect, exempt YOK)
+# 🛡️ CSRF Koruması
 csrf = CSRFProtect(app)
 
 db = SQLAlchemy(app)
@@ -114,7 +114,6 @@ class SecureAdminIndexView(AdminIndexView):
                 return redirect(url_for(".index"))
             else:
                 flash("Geçersiz kullanıcı adı veya şifre.", "error")
-                
         return self.render("admin/login.html")
 
     @expose("/logout")
@@ -130,7 +129,6 @@ class UploadModelView(ModelView):
     can_edit = False
     can_delete = False
 
-# Admin'i başlat
 admin = Admin(app, name="Histopathology Admin", template_mode="bootstrap4", index_view=SecureAdminIndexView())
 admin.add_view(UploadModelView(ImageUpload, db.session, name="Görüntü Analizleri"))
 
@@ -157,95 +155,113 @@ def is_likely_histopathology(image_path):
     except Exception:
         return False, "Görsel okunamadı."
 
-# 🌐 ROUTES
+# 🌐 API ROUTES (JSON Garantili)
 @app.route("/")
 def home():
     return render_template("index.html")
 
 @app.route("/upload", methods=["POST"])
 def upload_image():
-    if "image" not in request.files:
-        return jsonify({"error": "Dosya bulunamadı"}), 400
-    file = request.files["image"]
-    if not file.filename:
-        return jsonify({"error": "Dosya seçilmedi"}), 400
-    ext = Path(file.filename).suffix.lower()
-    if ext not in [".jpg", ".jpeg", ".png", ".webp"]:
-        return jsonify({"error": "Sadece JPG/JPEG/PNG/WebP desteklenir"}), 400
+    try:
+        if "image" not in request.files:
+            return jsonify({"error": "Dosya bulunamadı"}), 400
+        file = request.files["image"]
+        if not file.filename:
+            return jsonify({"error": "Dosya seçilmedi"}), 400
+        ext = Path(file.filename).suffix.lower()
+        if ext not in [".jpg", ".jpeg", ".png", ".webp"]:
+            return jsonify({"error": "Sadece JPG/JPEG/PNG/WebP desteklenir"}), 400
 
-    job_id = str(uuid.uuid4())
-    filename = f"{job_id}{ext}"
-    save_path = UPLOAD_FOLDER / filename
-    file.save(save_path)
+        job_id = str(uuid.uuid4())
+        filename = f"{job_id}{ext}"
+        save_path = UPLOAD_FOLDER / filename
+        file.save(save_path)
 
-    is_valid, reason = is_likely_histopathology(save_path)
-    if not is_valid:
-        os.remove(save_path)
-        return jsonify({"error": reason}), 400
+        is_valid, reason = is_likely_histopathology(save_path)
+        if not is_valid:
+            os.remove(save_path)
+            return jsonify({"error": reason}), 400
 
-    jobs[job_id] = {
-        "status": "processing", "created_at": datetime.now(), "result": None, "error": None,
-        "original_name": file.filename, "file_size_kb": os.path.getsize(save_path) // 1024,
-        "mime_type": file.content_type, "ip_address": request.remote_addr
-    }
+        jobs[job_id] = {
+            "status": "processing", "created_at": datetime.now(), "result": None, "error": None,
+            "original_name": file.filename, "file_size_kb": os.path.getsize(save_path) // 1024,
+            "mime_type": file.content_type, "ip_address": request.remote_addr
+        }
 
-    def process_in_background():
-        job = jobs[job_id]
-        upload_record = None
-        try:
-            start_ms = time.time()
-            from predict import predict_image_patches
-            result = predict_image_patches(save_path)
-            elapsed_ms = int((time.time() - start_ms) * 1000)
+        def process_in_background():
+            job = jobs[job_id]
+            upload_record = None
+            try:
+                start_ms = time.time()
+                from predict import predict_image_patches
+                result = predict_image_patches(save_path)
+                elapsed_ms = int((time.time() - start_ms) * 1000)
 
-            job["result"] = result
-            job["status"] = "completed"
+                job["result"] = result
+                job["status"] = "completed"
 
-            upload_record = ImageUpload(
-                filename=filename, original_name=job["original_name"],
-                file_size_kb=job["file_size_kb"], mime_type=job["mime_type"],
-                ip_address=job["ip_address"], risk_level=result["risk_level"],
-                cancer_ratio=result["cancer_ratio"], total_patches=result["total_patches"],
-                cancer_patches=result["cancer_patches"], processing_time_ms=elapsed_ms, status="completed"
-            )
-            db.session.add(upload_record)
-            db.session.flush()
-            log_audit("UPLOAD_ANALYZED", f"ID:{upload_record.id} Risk:{result['risk_level']}")
-            db.session.commit()
-            print(f"✅ Job {job_id} DB'ye kaydedildi!")
-        except Exception as e:
-            job["error"] = str(e)
-            job["status"] = "failed"
-            if upload_record:
-                upload_record.status = "failed"
+                upload_record = ImageUpload(
+                    filename=filename, original_name=job["original_name"],
+                    file_size_kb=job["file_size_kb"], mime_type=job["mime_type"],
+                    ip_address=job["ip_address"], risk_level=result["risk_level"],
+                    cancer_ratio=result["cancer_ratio"], total_patches=result["total_patches"],
+                    cancer_patches=result["cancer_patches"], processing_time_ms=elapsed_ms, status="completed"
+                )
+                db.session.add(upload_record)
+                db.session.flush()
+                log_audit("UPLOAD_ANALYZED", f"ID:{upload_record.id} Risk:{result['risk_level']}")
                 db.session.commit()
-            log_audit("UPLOAD_FAILED", str(e))
-            print(f"❌ Job {job_id} hatası: {e}")
-            traceback.print_exc()
+                print(f"✅ Job {job_id} DB'ye kaydedildi!")
+            except Exception as e:
+                job["error"] = str(e)
+                job["status"] = "failed"
+                if upload_record:
+                    upload_record.status = "failed"
+                    db.session.commit()
+                log_audit("UPLOAD_FAILED", str(e))
+                print(f"❌ Job {job_id} hatası: {e}")
+                traceback.print_exc()
 
-    threading.Thread(target=process_in_background, daemon=True).start()
-    return jsonify({"job_id": job_id})
+        threading.Thread(target=process_in_background, daemon=True).start()
+        return jsonify({"job_id": job_id})
+    
+    except Exception as e:
+        # 🔑 KRİTİK: API rotalarında her zaman JSON döndür
+        print(f"❌ /upload genel hatası: {e}")
+        traceback.print_exc()
+        return jsonify({"error": f"Sunucu hatası: {str(e)}"}), 500
 
 @app.route("/status/<job_id>", methods=["GET"])
 def get_status(job_id):
-    job = jobs.get(job_id)
-    if not job:
-        return jsonify({"error": "Job bulunamadı"}), 404
-    return jsonify({"status": job["status"], "result": job["result"], "error": job["error"]})
+    try:
+        job = jobs.get(job_id)
+        if not job:
+            return jsonify({"error": "Job bulunamadı"}), 404
+        return jsonify({"status": job["status"], "result": job["result"], "error": job["error"]})
+    except Exception as e:
+        return jsonify({"error": f"Status hatası: {str(e)}"}), 500
 
-# ⚠️ HATA YÖNETİCİLERİ (Session Cleanup Garantili)
+# ⚠️ HATA YÖNETİCİLERİ (API vs HTML Ayrımı - Garantili)
 @app.errorhandler(500)
 def internal_error(error):
-    db.session.rollback()  # 🔑 Kritik: Session state'i sıfırlar
-    if request.path.startswith('/upload') or request.path.startswith('/status') or request.is_json:
-        return jsonify({"error": "Sunucu hatası"}), 500
-    return render_template("admin/login.html", error="Sunucu tarafında beklenmeyen bir hata oluştu. Lütfen tekrar deneyin."), 500
+    db.session.rollback()
+    # API rotaları için JSON döndür
+    if request.path.startswith('/upload') or request.path.startswith('/status') or request.is_json or request.headers.get('Accept') == 'application/json':
+        return jsonify({"error": "Sunucu hatası. Lütfen tekrar deneyin."}), 500
+    # HTML bekleyen rotalar için
+    return render_template("admin/login.html", error="Bir hata oluştu."), 500
 
 @app.errorhandler(404)
 def not_found(error):
-    if request.path.startswith('/upload') or request.is_json:
-        return jsonify({"error": "Bulunamadı"}), 404
+    if request.path.startswith('/upload') or request.path.startswith('/status') or request.is_json:
+        return jsonify({"error": "Endpoint bulunamadı"}), 404
     abort(404)
+
+@app.errorhandler(400)
+def bad_request(error):
+    if request.path.startswith('/upload') or request.path.startswith('/status') or request.is_json:
+        return jsonify({"error": "Geçersiz istek"}), 400
+    abort(400)
 
 # 🚀 BAŞLANGIÇ
 with app.app_context():
