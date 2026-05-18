@@ -1,11 +1,11 @@
 import os, uuid, traceback, threading, time
 from datetime import datetime
-from flask import Flask, request, jsonify, render_template, redirect, url_for, flash, session, abort
+from flask import Flask, request, jsonify, render_template, redirect, url_for, flash, session
 from flask_sqlalchemy import SQLAlchemy
 from flask_admin import Admin, AdminIndexView, expose
 from flask_admin.contrib.sqla import ModelView
 from flask_talisman import Talisman
-from flask_wtf.csrf import CSRFProtect
+from flask_wtf.csrf import CSRFProtect, csrf_exempt
 from werkzeug.security import generate_password_hash, check_password_hash
 from pathlib import Path
 from PIL import Image, ImageStat
@@ -122,6 +122,11 @@ class SecureAdminIndexView(AdminIndexView):
         session.pop("admin_logged_in", None)
         return redirect(url_for(".login"))
 
+# ✅ CSRF'yi admin login view'ı için exempt et (Doğru Yöntem)
+@csrf_exempt
+def admin_login_view():
+    return SecureAdminIndexView.login
+
 class UploadModelView(ModelView):
     column_list = ("id", "original_name", "risk_level", "cancer_ratio", "uploaded_at", "status")
     column_searchable_list = ("original_name", "risk_level")
@@ -130,11 +135,9 @@ class UploadModelView(ModelView):
     can_edit = False
     can_delete = False
 
+# Admin'i başlat
 admin = Admin(app, name="Histopathology Admin", template_mode="bootstrap4", index_view=SecureAdminIndexView())
 admin.add_view(UploadModelView(ImageUpload, db.session, name="Görüntü Analizleri"))
-
-# 🛡️ Admin rotaları için CSRF'yi güvenli şekilde esnet
-csrf.exempt(admin.blueprint)
 
 # 🛡️ YARDIMCI FONKSİYONLAR
 def log_audit(action, details=""):
@@ -241,7 +244,6 @@ def internal_error(error):
     db.session.rollback()  # 🔑 Kritik: Session state'i sıfırlar
     if request.path.startswith('/upload') or request.path.startswith('/status') or request.is_json:
         return jsonify({"error": "Sunucu hatası"}), 500
-    # Admin paneli için güvenli fallback
     return render_template("admin/login.html", error="Sunucu tarafında beklenmeyen bir hata oluştu. Lütfen tekrar deneyin."), 500
 
 @app.errorhandler(404)
