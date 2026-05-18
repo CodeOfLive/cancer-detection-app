@@ -76,10 +76,10 @@ class ImageUpload(db.Model):
     status = db.Column(db.String(20), default="completed")
     
     # ✅ YENİ SÜTUNLAR
-    image_dimensions = db.Column(db.String(20))  # "1024x768" formatında
-    confidence_score = db.Column(db.Float)  # 0-1 arası model güven skoru
-    patch_details = db.Column(db.Text)  # JSON string: her patch'in skoru
-    reviewed_by = db.Column(db.String(50))  # İnceleyen uzman adı
+    image_dimensions = db.Column(db.String(20))
+    confidence_score = db.Column(db.Float)
+    patch_details = db.Column(db.Text)
+    reviewed_by = db.Column(db.String(50))
 
 class AuditLog(db.Model):
     __tablename__ = "audit_logs"
@@ -89,22 +89,31 @@ class AuditLog(db.Model):
     ip_address = db.Column(db.String(45))
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
 
-# 🔐 ADMIN PANEL
+# 🔐 ADMIN PANEL - ROBUST AUTH
 class SecureAdminIndexView(AdminIndexView):
+    def is_accessible(self):
+        return session.get("admin_logged_in")
+    
+    def inaccessible_callback(self, name, **kwargs):
+        return redirect(url_for(".login"))
+    
     @expose("/")
     def index(self):
         if not session.get("admin_logged_in"):
             return redirect(url_for(".login"))
         return super().index()
+    
     @expose("/login", methods=["GET", "POST"])
     def login(self):
         if request.method == "POST":
             username = request.form.get("username")
             password = request.form.get("password")
             user = AdminUser.query.filter_by(username=username).first()
+            
             if user and user.check_password(password) and user.is_active:
                 session["admin_logged_in"] = True
                 session["admin_user"] = user.username
+                session.permanent = True  # Session ömrünü uzat
                 try:
                     log = AuditLog(action="ADMIN_LOGIN", ip_address=request.remote_addr)
                     db.session.add(log)
@@ -117,25 +126,48 @@ class SecureAdminIndexView(AdminIndexView):
             else:
                 flash("Geçersiz kullanıcı adı veya şifre.", "error")
         return self.render("admin/login.html")
+    
     @expose("/logout")
     def logout(self):
         session.pop("admin_logged_in", None)
+        session.pop("admin_user", None)
         return redirect(url_for(".login"))
 
-class UploadModelView(ModelView):
-    column_list = ("id", "original_name", "risk_level", "cancer_ratio", "uploaded_at", "status")
+# 🔐 Admin View için özel ModelView (auth kontrolü ekli)
+class SecureModelView(ModelView):
+    def is_accessible(self):
+        return session.get("admin_logged_in")
+    
+    def inaccessible_callback(self, name, **kwargs):
+        flash("Lütfen önce giriş yapın.", "error")
+        return redirect(url_for("admin.login"))
+
+class UploadModelView(SecureModelView):
+    column_list = ("id", "original_name", "risk_level", "cancer_ratio", "image_dimensions", "confidence_score", "uploaded_at", "status")
     column_searchable_list = ("original_name", "risk_level")
     column_filters = ("risk_level", "uploaded_at")
     can_create = False
     can_edit = False
     can_delete = False
+    column_labels = {
+        "original_name": "Orijinal İsim",
+        "risk_level": "Risk Seviyesi",
+        "cancer_ratio": "Kanser Oranı",
+        "image_dimensions": "Boyut",
+        "confidence_score": "Güven Skoru",
+        "uploaded_at": "Tarih",
+        "status": "Durum"
+    }
 
+# ✅ Admin'i başlat ve CSRF'den muaf tut
 admin = Admin(app, name="Histopathology Admin", template_mode="bootstrap4", index_view=SecureAdminIndexView())
 admin.add_view(UploadModelView(ImageUpload, db.session, name="Görüntü Analizleri"))
 
+# ✅ Flask-Admin'in TÜM rotalarını CSRF'den muaf tut (CRITICAL FIX)
+csrf.exempt(admin)
+
 # 🛡️ YARDIMCI FONKSİYONLAR
 def log_audit(action, details="", ip_address=None):
-    """Thread-safe audit logging"""
     try:
         log = AuditLog(action=action, details=details, ip_address=ip_address or "system")
         db.session.add(log)
@@ -213,7 +245,6 @@ def upload_image():
             if os.path.exists(save_path): os.remove(save_path)
             return jsonify({"error": reason}), 400
 
-        # Thread'e aktarılacak veriler
         thread_data = {
             "job_id": job_id, "filename": filename, "save_path": save_path,
             "original_name": file.filename, "file_size_kb": os.path.getsize(save_path) // 1024,
@@ -243,7 +274,6 @@ def upload_image():
                     job["result"] = result
                     job["status"] = "completed"
 
-                    # ✅ Yeni sütunları da kaydet
                     h, w, _ = img.shape
                     avg_confidence = 1.0 - result["cancer_ratio"] / 100.0
                     
@@ -295,61 +325,31 @@ def get_status(job_id):
     except Exception as e:
         return jsonify({"error": f"Status hatası: {str(e)}"}), 500
 
-# ✅ CSV EXPORT ENDPOINT
 @app.route("/admin/export/csv")
 @csrf.exempt
 def export_csv():
-    """Tüm analizleri CSV olarak dışa aktar"""
     if not session.get("admin_logged_in"):
         return jsonify({"error": "Unauthorized"}), 401
-    
     uploads = ImageUpload.query.all()
     output = io.StringIO()
     writer = csv.writer(output)
-    
-    writer.writerow([
-        "ID", "Orijinal İsim", "Risk Seviyesi", "Kanser Oranı", 
-        "Boyut", "Güven Skoru", "Patch Detayı", "İnceleyen", 
-        "Yüklenme Tarihi", "Durum"
-    ])
-    
+    writer.writerow(["ID", "Orijinal İsim", "Risk Seviyesi", "Kanser Oranı", "Boyut", "Güven Skoru", "Patch Detayı", "İnceleyen", "Yüklenme Tarihi", "Durum"])
     for u in uploads:
-        writer.writerow([
-            u.id, u.original_name, u.risk_level, f"%{u.cancer_ratio}",
-            u.image_dimensions or "N/A", u.confidence_score if u.confidence_score else "N/A",
-            u.patch_details or "N/A", u.reviewed_by or "N/A",
-            u.uploaded_at.strftime("%d.%m.%Y %H:%M"), u.status
-        ])
-    
-    return Response(
-        output.getvalue(),
-        mimetype="text/csv; charset=utf-8",
-        headers={"Content-Disposition": f"attachment;filename=analizler_{datetime.now().strftime('%Y%m%d')}.csv"}
-    )
+        writer.writerow([u.id, u.original_name, u.risk_level, f"%{u.cancer_ratio}", u.image_dimensions or "N/A", u.confidence_score if u.confidence_score else "N/A", u.patch_details or "N/A", u.reviewed_by or "N/A", u.uploaded_at.strftime("%d.%m.%Y %H:%M"), u.status])
+    return Response(output.getvalue(), mimetype="text/csv; charset=utf-8", headers={"Content-Disposition": f"attachment;filename=analizler_{datetime.now().strftime('%Y%m%d')}.csv"})
 
-# ✅ MODERN DASHBOARD ROUTE
 @app.route("/dashboard")
 @csrf.exempt
 def dashboard():
-    """Modern admin dashboard"""
     if not session.get("admin_logged_in"):
         return redirect(url_for("admin.login"))
-    
     total = ImageUpload.query.count()
     high_risk = ImageUpload.query.filter_by(risk_level="yüksek").count()
     medium_risk = ImageUpload.query.filter_by(risk_level="orta").count()
     low_risk = ImageUpload.query.filter_by(risk_level="düşük").count()
-    today = ImageUpload.query.filter(
-        db.func.date(ImageUpload.uploaded_at) == datetime.utcnow().date()
-    ).count()
-    
+    today = ImageUpload.query.filter(db.func.date(ImageUpload.uploaded_at) == datetime.utcnow().date()).count()
     recent = ImageUpload.query.order_by(ImageUpload.uploaded_at.desc()).limit(10).all()
-    
-    return render_template("dashboard.html", 
-                          stats={"total": total, "high_risk": high_risk, 
-                               "medium_risk": medium_risk, "low_risk": low_risk, 
-                               "today": today},
-                          recent=recent)
+    return render_template("dashboard.html", stats={"total": total, "high_risk": high_risk, "medium_risk": medium_risk, "low_risk": low_risk, "today": today}, recent=recent)
 
 # ⚠️ HATA YÖNETİCİLERİ
 @app.errorhandler(500)
