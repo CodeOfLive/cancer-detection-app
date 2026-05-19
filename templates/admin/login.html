@@ -29,7 +29,7 @@
         {% endwith %}
         
         <form method="POST">
-            <!-- ✅ KRİTİK: CSRF Token (Flask-WTF için zorunlu) -->
+            <!-- CSRF Token (Flask-WTF için zorunlu) -->
             <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
             
             <input type="text" name="username" placeholder="Kullanıcı Adı" required autocomplete="username">

@@ -1,7 +1,7 @@
 import os, uuid, traceback, threading, time, json, csv, io
 from datetime import datetime, timedelta
 from functools import wraps
-from flask import Flask, request, jsonify, render_template, redirect, url_for, flash, session, Response, abort
+from flask import Flask, request, jsonify, render_template, redirect, url_for, flash, session, Response, abort, make_response
 from flask_sqlalchemy import SQLAlchemy
 from flask_talisman import Talisman
 from flask_wtf import CSRFProtect
@@ -17,11 +17,11 @@ app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
 
 # 🔐 Session & Security Config (Render için optimize)
 app.config["SECRET_KEY"] = os.environ.get("SECRET_KEY", os.urandom(32).hex())
-app.config["SESSION_COOKIE_SECURE"] = False  # Render proxy'si nedeniyle False (HTTPS zaten zorunlu)
+app.config["SESSION_COOKIE_SECURE"] = False  # Render proxy'si nedeniyle False
 app.config["SESSION_COOKIE_HTTPONLY"] = True
-app.config["SESSION_COOKIE_SAMESITE"] = "Lax"
+app.config["SESSION_COOKIE_SAMESITE"] = "Lax"  # Cross-site redirect için Lax
+app.config["SESSION_COOKIE_PATH"] = "/"  # Tüm yollar için cookie geçerli
 app.config["PERMANENT_SESSION_LIFETIME"] = timedelta(hours=24)
-app.config["TRUSTED_PROXIES"] = ['127.0.0.1', '::1']  # Flask için proxy ayarı
 
 # 🔹 PostgreSQL (Neon) Optimizasyonu
 app.config["SQLALCHEMY_ENGINE_OPTIONS"] = {
@@ -37,7 +37,7 @@ os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 app.static_folder = 'static'
 app.static_url_path = '/static'
 
-# 🔒 Talisman CSP (proxy_count KALDIRILDI)
+# 🔒 Talisman CSP
 csp = {
     'default-src': "'self'",
     'style-src': ["'self'", "'unsafe-inline'", "https://fonts.googleapis.com"],
@@ -97,8 +97,9 @@ class AuditLog(db.Model):
 def admin_required(f):
     @wraps(f)
     def decorated_function(*args, **kwargs):
-        if not session.get("admin_logged_in"):
-            print(f"⚠️ Yetkisiz erişim: {request.path}, session: {session.get('admin_logged_in')}")
+        logged_in = session.get("admin_logged_in")
+        print(f"🔐 admin_required check: {request.path}, session: {logged_in}")
+        if not logged_in:
             flash("Lütfen önce giriş yapın.", "error")
             return redirect(url_for("admin_login"))
         return f(*args, **kwargs)
@@ -214,12 +215,28 @@ def admin_login():
                 flash("Giriş başarılı.", "success")
                 
                 # Debug log
-                print(f"🍪 Session cookie ayarları: Secure={app.config['SESSION_COOKIE_SECURE']}, SameSite={app.config['SESSION_COOKIE_SAMESITE']}")
+                print(f"🍪 Session cookie ayarları: Secure={app.config['SESSION_COOKIE_SECURE']}, SameSite={app.config['SESSION_COOKIE_SAMESITE']}, Path={app.config['SESSION_COOKIE_PATH']}")
                 print(f"🔑 Session içeriği: {dict(session)}")
                 
-                # ✅ Redirect ile GET isteği gönder
-                response = redirect("/dashboard", code=302)
-                print("🚀 Dashboard'a yönlendiriliyor...")
+                # ✅ CLIENT-SIDE REDIRECT (Cookie oturması için JavaScript kullan)
+                # Bu, tarayıcının cookie'yi kabul etmesini garanti eder
+                html_response = '''
+                <!DOCTYPE html>
+                <html>
+                <head>
+                    <meta http-equiv="refresh" content="0;url=/dashboard">
+                    <script>window.location.href = "/dashboard";</script>
+                </head>
+                <body>
+                    <p>Giriş başarılı, yönlendiriliyorsunuz...</p>
+                </body>
+                </html>
+                '''
+                response = make_response(html_response)
+                response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
+                response.headers["Pragma"] = "no-cache"
+                response.headers["Expires"] = "0"
+                print("🚀 Client-side redirect ile dashboard'a yönlendiriliyor...")
                 return response
             else:
                 print("❌ Giriş başarısız: kullanıcı yok veya şifre yanlış")
