@@ -17,10 +17,11 @@ app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
 
 # 🔐 Session & Security Config (Render için optimize)
 app.config["SECRET_KEY"] = os.environ.get("SECRET_KEY", os.urandom(32).hex())
-app.config["SESSION_COOKIE_SECURE"] = False  # Render proxy'si nedeniyle False yaptık (HTTPS zaten zorunlu)
+app.config["SESSION_COOKIE_SECURE"] = False  # Render proxy'si nedeniyle False (HTTPS zaten zorunlu)
 app.config["SESSION_COOKIE_HTTPONLY"] = True
-app.config["SESSION_COOKIE_SAMESITE"] = "Lax"  # Cross-site redirect için Lax
+app.config["SESSION_COOKIE_SAMESITE"] = "Lax"
 app.config["PERMANENT_SESSION_LIFETIME"] = timedelta(hours=24)
+app.config["TRUSTED_PROXIES"] = ['127.0.0.1', '::1']  # Flask için proxy ayarı
 
 # 🔹 PostgreSQL (Neon) Optimizasyonu
 app.config["SQLALCHEMY_ENGINE_OPTIONS"] = {
@@ -36,7 +37,7 @@ os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 app.static_folder = 'static'
 app.static_url_path = '/static'
 
-# 🔒 Talisman CSP (Proxy ayarları)
+# 🔒 Talisman CSP (proxy_count KALDIRILDI)
 csp = {
     'default-src': "'self'",
     'style-src': ["'self'", "'unsafe-inline'", "https://fonts.googleapis.com"],
@@ -45,8 +46,7 @@ csp = {
     'font-src': ["'self'", "https://fonts.googleapis.com", "https://fonts.gstatic.com"],
     'connect-src': "'self'"
 }
-# proxy_count=1: Render'ın proxy'sini dikkate al
-Talisman(app, force_https=False, content_security_policy=csp, proxy_count=1)
+Talisman(app, force_https=False, content_security_policy=csp)
 
 # 🛡️ CSRF Koruması
 csrf = CSRFProtect(app)
@@ -98,7 +98,7 @@ def admin_required(f):
     @wraps(f)
     def decorated_function(*args, **kwargs):
         if not session.get("admin_logged_in"):
-            print(f"⚠️ Yetkisiz erişim denemesi: {request.path}, session: {session.get('admin_logged_in')}")
+            print(f"⚠️ Yetkisiz erişim: {request.path}, session: {session.get('admin_logged_in')}")
             flash("Lütfen önce giriş yapın.", "error")
             return redirect(url_for("admin_login"))
         return f(*args, **kwargs)
@@ -200,9 +200,7 @@ def admin_login():
                 session["admin_logged_in"] = True
                 session["admin_user"] = username
                 session.permanent = True
-                
-                # Session cookie ayarlarını request context'inde güncelle
-                session.modified = True
+                session.modified = True  # Session'ın kaydedilmesini zorla
                 
                 try:
                     log = AuditLog(action="ADMIN_LOGIN", ip_address=request.remote_addr)
@@ -215,10 +213,11 @@ def admin_login():
                 
                 flash("Giriş başarılı.", "success")
                 
-                # ✅ Debug: Session durumunu logla
+                # Debug log
                 print(f"🍪 Session cookie ayarları: Secure={app.config['SESSION_COOKIE_SECURE']}, SameSite={app.config['SESSION_COOKIE_SAMESITE']}")
                 print(f"🔑 Session içeriği: {dict(session)}")
                 
+                # ✅ Redirect ile GET isteği gönder
                 response = redirect("/dashboard", code=302)
                 print("🚀 Dashboard'a yönlendiriliyor...")
                 return response
