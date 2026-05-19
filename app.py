@@ -1,5 +1,6 @@
 import os, uuid, traceback, threading, time, json, csv, io
 from datetime import datetime
+from functools import wraps
 from flask import Flask, request, jsonify, render_template, redirect, url_for, flash, session, Response
 from flask_sqlalchemy import SQLAlchemy
 from flask_talisman import Talisman
@@ -14,6 +15,8 @@ app.config["MAX_CONTENT_LENGTH"] = 32 * 1024 * 1024
 app.config["SQLALCHEMY_DATABASE_URI"] = os.environ.get("DATABASE_URL")
 app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
 app.config["SECRET_KEY"] = os.environ.get("SECRET_KEY", os.urandom(32).hex())
+app.config["SESSION_PERMANENT"] = True
+app.config["PERMANENT_SESSION_LIFETIME"] = 3600  # 1 saat
 
 # 🔹 PostgreSQL (Neon) Optimizasyonu
 app.config["SQLALCHEMY_ENGINE_OPTIONS"] = {
@@ -72,8 +75,6 @@ class ImageUpload(db.Model):
     cancer_patches = db.Column(db.Integer)
     processing_time_ms = db.Column(db.Integer)
     status = db.Column(db.String(20), default="completed")
-    
-    # ✅ YENİ SÜTUNLAR
     image_dimensions = db.Column(db.String(20))
     confidence_score = db.Column(db.Float)
     patch_details = db.Column(db.Text)
@@ -87,10 +88,8 @@ class AuditLog(db.Model):
     ip_address = db.Column(db.String(45))
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
 
-# 🔐 ADMIN AUTH (Basit ve Stabil)
+# 🔐 ADMIN AUTH DEKORATÖRÜ
 def admin_required(f):
-    """Admin yetkilendirme dekoratörü"""
-    from functools import wraps
     @wraps(f)
     def decorated_function(*args, **kwargs):
         if not session.get("admin_logged_in"):
@@ -147,37 +146,57 @@ def is_likely_histopathology(image_array):
 def home():
     return render_template("index.html")
 
+# ✅ ADMIN LOGIN (GET + POST)
 @app.route("/admin/login", methods=["GET", "POST"])
 @csrf.exempt
 def admin_login():
-    print("🔍 /admin/login endpoint'i tetiklendi.")
-    
-    if request.method == "POST":
-        username = request.form.get("username")
-        password = request.form.get("password")
-        expected_pass = os.environ.get("ADMIN_PASSWORD", "test123")
-        
-        # Geçici DB'siz kontrol
-        if username == "admin" and password == expected_pass:
-            session["admin_logged_in"] = True
-            session["admin_user"] = "admin"
-            print("✅ Debug giriş başarılı.")
-            return redirect(url_for("dashboard"))
-        else:
-            flash("Geçersiz bilgiler (debug mod).", "error")
-    
-    # Template render test
     try:
+        if request.method == "POST":
+            username = request.form.get("username")
+            password = request.form.get("password")
+            
+            try:
+                user = AdminUser.query.filter_by(username=username).first()
+            except Exception as db_err:
+                print(f"⚠️ DB query hatası: {db_err}")
+                db.session.rollback()
+                flash("Veritabanı hatası.", "error")
+                return render_template("admin/login.html")
+            
+            expected_pass = os.environ.get("ADMIN_PASSWORD", "SecurePass123!")
+            if user and user.check_password(password) and user.is_active:
+                session["admin_logged_in"] = True
+                session["admin_user"] = user.username
+                session.permanent = True
+                try:
+                    log = AuditLog(action="ADMIN_LOGIN", ip_address=request.remote_addr)
+                    db.session.add(log)
+                    db.session.commit()
+                except Exception as e:
+                    db.session.rollback()
+                    print(f"⚠️ Audit log hatası: {e}")
+                flash("Giriş başarılı.", "success")
+                # ✅ Redirect ile GET isteği gönder
+                return redirect("/dashboard", code=302)
+            else:
+                flash("Geçersiz kullanıcı adı veya şifre.", "error")
+        
         return render_template("admin/login.html")
+    
     except Exception as e:
-        print(f"❌ Template render hatası: {e}")
-        return f"<h1>Template Bulunamadı veya Hatalı: {e}</h1>", 500
-@app.route("/admin/logout")
+        print(f"❌ /admin/login hatası: {e}")
+        traceback.print_exc()
+        flash("Beklenmeyen hata.", "error")
+        return render_template("admin/login.html")
+
+# ✅ ADMIN LOGOUT (GET + POST)
+@app.route("/admin/logout", methods=["GET", "POST"])
+@admin_required
 def admin_logout():
     session.pop("admin_logged_in", None)
     session.pop("admin_user", None)
     flash("Çıkış yapıldı.", "success")
-    return redirect(url_for("home"))
+    return redirect("/", code=302)
 
 @app.route("/upload", methods=["POST"])
 @csrf.exempt
@@ -290,29 +309,39 @@ def get_status(job_id):
     except Exception as e:
         return jsonify({"error": f"Status hatası: {str(e)}"}), 500
 
-@app.route("/admin/export/csv")
+# ✅ CSV EXPORT (GET + POST)
+@app.route("/admin/export/csv", methods=["GET", "POST"])
 @admin_required
 @csrf.exempt
 def export_csv():
-    uploads = ImageUpload.query.all()
-    output = io.StringIO()
-    writer = csv.writer(output)
-    writer.writerow(["ID", "Orijinal İsim", "Risk Seviyesi", "Kanser Oranı", "Boyut", "Güven Skoru", "Patch Detayı", "İnceleyen", "Yüklenme Tarihi", "Durum"])
-    for u in uploads:
-        writer.writerow([u.id, u.original_name, u.risk_level, f"%{u.cancer_ratio}", u.image_dimensions or "N/A", u.confidence_score if u.confidence_score else "N/A", u.patch_details or "N/A", u.reviewed_by or "N/A", u.uploaded_at.strftime("%d.%m.%Y %H:%M"), u.status])
-    return Response(output.getvalue(), mimetype="text/csv; charset=utf-8", headers={"Content-Disposition": f"attachment;filename=analizler_{datetime.now().strftime('%Y%m%d')}.csv"})
+    try:
+        uploads = ImageUpload.query.all()
+        output = io.StringIO()
+        writer = csv.writer(output)
+        writer.writerow(["ID", "Orijinal İsim", "Risk Seviyesi", "Kanser Oranı", "Boyut", "Güven Skoru", "Patch Detayı", "İnceleyen", "Yüklenme Tarihi", "Durum"])
+        for u in uploads:
+            writer.writerow([u.id, u.original_name, u.risk_level, f"%{u.cancer_ratio}", u.image_dimensions or "N/A", u.confidence_score if u.confidence_score else "N/A", u.patch_details or "N/A", u.reviewed_by or "N/A", u.uploaded_at.strftime("%d.%m.%Y %H:%M"), u.status])
+        return Response(output.getvalue(), mimetype="text/csv; charset=utf-8", headers={"Content-Disposition": f"attachment;filename=analizler_{datetime.now().strftime('%Y%m%d')}.csv"})
+    except Exception as e:
+        print(f"❌ CSV export hatası: {e}")
+        return jsonify({"error": "CSV export hatası"}), 500
 
-@app.route("/dashboard")
+# ✅ DASHBOARD (GET + POST)
+@app.route("/dashboard", methods=["GET", "POST"])
 @admin_required
 @csrf.exempt
 def dashboard():
-    total = ImageUpload.query.count()
-    high_risk = ImageUpload.query.filter_by(risk_level="yüksek").count()
-    medium_risk = ImageUpload.query.filter_by(risk_level="orta").count()
-    low_risk = ImageUpload.query.filter_by(risk_level="düşük").count()
-    today = ImageUpload.query.filter(db.func.date(ImageUpload.uploaded_at) == datetime.utcnow().date()).count()
-    recent = ImageUpload.query.order_by(ImageUpload.uploaded_at.desc()).limit(10).all()
-    return render_template("dashboard.html", stats={"total": total, "high_risk": high_risk, "medium_risk": medium_risk, "low_risk": low_risk, "today": today}, recent=recent)
+    try:
+        total = ImageUpload.query.count()
+        high_risk = ImageUpload.query.filter_by(risk_level="yüksek").count()
+        medium_risk = ImageUpload.query.filter_by(risk_level="orta").count()
+        low_risk = ImageUpload.query.filter_by(risk_level="düşük").count()
+        today = ImageUpload.query.filter(db.func.date(ImageUpload.uploaded_at) == datetime.utcnow().date()).count()
+        recent = ImageUpload.query.order_by(ImageUpload.uploaded_at.desc()).limit(10).all()
+        return render_template("dashboard.html", stats={"total": total, "high_risk": high_risk, "medium_risk": medium_risk, "low_risk": low_risk, "today": today}, recent=recent)
+    except Exception as e:
+        print(f"❌ Dashboard hatası: {e}")
+        return render_template("admin/login.html", error="Dashboard yüklenemedi."), 500
 
 # ⚠️ HATA YÖNETİCİLERİ
 @app.errorhandler(500)
@@ -327,6 +356,14 @@ def not_found(error):
     if request.path.startswith('/upload') or request.path.startswith('/status') or request.is_json:
         return jsonify({"error": "Endpoint bulunamadı"}), 404
     abort(404)
+
+@app.errorhandler(405)
+def method_not_allowed(error):
+    # ✅ 405 hatasını yakala ve anlamlı mesaj döndür
+    if request.path.startswith('/upload') or request.path.startswith('/status') or request.is_json:
+        return jsonify({"error": "Bu endpoint sadece POST/GET destekler"}), 405
+    flash("Yöntem desteklenmiyor. Lütfen linki kontrol edin.", "error")
+    return redirect(url_for("home"))
 
 @app.errorhandler(400)
 def bad_request(error):
