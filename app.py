@@ -148,30 +148,30 @@ def home():
     return render_template("index.html")
 
 @app.route("/admin/login", methods=["GET", "POST"])
+@csrf.exempt
 def admin_login():
-    """Basit admin login"""
+    print("🔍 /admin/login endpoint'i tetiklendi.")
+    
     if request.method == "POST":
         username = request.form.get("username")
         password = request.form.get("password")
-        user = AdminUser.query.filter_by(username=username).first()
+        expected_pass = os.environ.get("ADMIN_PASSWORD", "test123")
         
-        if user and user.check_password(password) and user.is_active:
+        # Geçici DB'siz kontrol
+        if username == "admin" and password == expected_pass:
             session["admin_logged_in"] = True
-            session["admin_user"] = user.username
-            session.permanent = True
-            try:
-                log = AuditLog(action="ADMIN_LOGIN", ip_address=request.remote_addr)
-                db.session.add(log)
-                db.session.commit()
-            except Exception as e:
-                db.session.rollback()
-                print(f"⚠️ Audit log hatası: {e}")
-            flash("Giriş başarılı.", "success")
+            session["admin_user"] = "admin"
+            print("✅ Debug giriş başarılı.")
             return redirect(url_for("dashboard"))
         else:
-            flash("Geçersiz kullanıcı adı veya şifre.", "error")
-    return render_template("admin/login.html")
-
+            flash("Geçersiz bilgiler (debug mod).", "error")
+    
+    # Template render test
+    try:
+        return render_template("admin/login.html")
+    except Exception as e:
+        print(f"❌ Template render hatası: {e}")
+        return f"<h1>Template Bulunamadı veya Hatalı: {e}</h1>", 500
 @app.route("/admin/logout")
 def admin_logout():
     session.pop("admin_logged_in", None)
