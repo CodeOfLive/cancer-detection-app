@@ -362,7 +362,7 @@
             <div id="tableBody">
                 {% for upload in recent %}
                 <div class="table-row">
-                    <div class="table-cell date">{{ upload.uploaded_at.strftime('%Y-%m-%d %H:%M:%S') }}</div>
+                    <div class="table-cell date">{{ upload.uploaded_at.strftime('%d.%m.%Y %H:%M') }}</div>
                     <div class="table-cell">
                         <span class="module-badge gorsel">
                             <i class="fas fa-microscope"></i> Görsel
