@@ -28,9 +28,9 @@
             {% endif %}
         {% endwith %}
         
-        <!-- ✅ Form action YOK (Flask otomatik aynı rotaya POST eder) -->
+        <!-- ✅ Form action YOK, method="POST" yeterli -->
         <form method="POST">
-            <!-- CSRF Token (Flask-WTF için zorunlu) -->
+            <!-- CSRF Token (Flask-WTF için) -->
             <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
             
             <input type="text" name="username" placeholder="Kullanıcı Adı" required autocomplete="username">

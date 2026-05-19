@@ -1,5 +1,5 @@
 import os, uuid, traceback, threading, time, json, csv, io
-from datetime import datetime
+from datetime import datetime, timedelta
 from functools import wraps
 from flask import Flask, request, jsonify, render_template, redirect, url_for, flash, session, Response
 from flask_sqlalchemy import SQLAlchemy
@@ -14,9 +14,13 @@ app = Flask(__name__)
 app.config["MAX_CONTENT_LENGTH"] = 32 * 1024 * 1024
 app.config["SQLALCHEMY_DATABASE_URI"] = os.environ.get("DATABASE_URL")
 app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
+
+# 🔐 Session & Security Config (Render için optimize)
 app.config["SECRET_KEY"] = os.environ.get("SECRET_KEY", os.urandom(32).hex())
-app.config["SESSION_PERMANENT"] = True
-app.config["PERMANENT_SESSION_LIFETIME"] = 3600  # 1 saat
+app.config["SESSION_COOKIE_SECURE"] = True  # Sadece HTTPS
+app.config["SESSION_COOKIE_HTTPONLY"] = True
+app.config["SESSION_COOKIE_SAMESITE"] = "Lax"
+app.config["PERMANENT_SESSION_LIFETIME"] = timedelta(hours=24)
 
 # 🔹 PostgreSQL (Neon) Optimizasyonu
 app.config["SQLALCHEMY_ENGINE_OPTIONS"] = {
@@ -146,55 +150,63 @@ def is_likely_histopathology(image_array):
 def home():
     return render_template("index.html")
 
-# ✅ ADMIN LOGIN (GET + POST)
+# ✅ ROBUST LOGIN - CSRF EXEMPT + ERROR LOGGING
 @app.route("/admin/login", methods=["GET", "POST"])
-@csrf.exempt
+@csrf.exempt  # 🔑 KRİTİK: Login rotasını CSRF korumasından TAMAMEN muaf tut
 def admin_login():
-    try:
-        if request.method == "POST":
-            username = request.form.get("username")
-            password = request.form.get("password")
-            
-            try:
-                user = AdminUser.query.filter_by(username=username).first()
-            except Exception as db_err:
-                print(f"⚠️ DB query hatası: {db_err}")
-                db.session.rollback()
-                flash("Veritabanı hatası.", "error")
-                return render_template("admin/login.html")
-            
+    print(f"🔍 Login isteği: {request.method}")
+    
+    if request.method == "POST":
+        username = request.form.get("username")
+        password = request.form.get("password")
+        print(f"🔐 Login denemesi: username={username}")
+        
+        try:
+            user = AdminUser.query.filter_by(username=username).first()
             expected_pass = os.environ.get("ADMIN_PASSWORD", "SecurePass123!")
+            
+            # Debug: DB'den gelen hash'i kontrol et
+            if user:
+                print(f"✅ Kullanıcı bulundu, password check: {user.check_password(password)}")
+            
             if user and user.check_password(password) and user.is_active:
+                print("✅ Giriş başarılı, session oluşturuluyor...")
+                session.clear()  # Önceki session'ı temizle
                 session["admin_logged_in"] = True
-                session["admin_user"] = user.username
+                session["admin_user"] = username
                 session.permanent = True
+                
                 try:
                     log = AuditLog(action="ADMIN_LOGIN", ip_address=request.remote_addr)
                     db.session.add(log)
                     db.session.commit()
-                except Exception as e:
+                    print("✅ Audit log kaydedildi")
+                except Exception as log_err:
                     db.session.rollback()
-                    print(f"⚠️ Audit log hatası: {e}")
+                    print(f"⚠️ Audit log hatası: {log_err}")
+                
                 flash("Giriş başarılı.", "success")
-                # ✅ Redirect ile GET isteği gönder
-                return redirect("/dashboard", code=302)
+                # ✅ Explicit redirect with 302
+                response = redirect("/dashboard", code=302)
+                print("🚀 Dashboard'a yönlendiriliyor...")
+                return response
             else:
+                print("❌ Giriş başarısız: kullanıcı yok veya şifre yanlış")
                 flash("Geçersiz kullanıcı adı veya şifre.", "error")
-        
-        return render_template("admin/login.html")
+                
+        except Exception as e:
+            print(f"❌ Login exception: {e}")
+            traceback.print_exc()
+            db.session.rollback()
+            flash("Veritabanı hatası. Lütfen tekrar deneyin.", "error")
     
-    except Exception as e:
-        print(f"❌ /admin/login hatası: {e}")
-        traceback.print_exc()
-        flash("Beklenmeyen hata.", "error")
-        return render_template("admin/login.html")
+    return render_template("admin/login.html")
 
-# ✅ ADMIN LOGOUT (GET + POST)
 @app.route("/admin/logout", methods=["GET", "POST"])
 @admin_required
 def admin_logout():
-    session.pop("admin_logged_in", None)
-    session.pop("admin_user", None)
+    print("🚪 Logout isteği")
+    session.clear()
     flash("Çıkış yapıldı.", "success")
     return redirect("/", code=302)
 
@@ -309,7 +321,6 @@ def get_status(job_id):
     except Exception as e:
         return jsonify({"error": f"Status hatası: {str(e)}"}), 500
 
-# ✅ CSV EXPORT (GET + POST)
 @app.route("/admin/export/csv", methods=["GET", "POST"])
 @admin_required
 @csrf.exempt
@@ -326,7 +337,6 @@ def export_csv():
         print(f"❌ CSV export hatası: {e}")
         return jsonify({"error": "CSV export hatası"}), 500
 
-# ✅ DASHBOARD (GET + POST)
 @app.route("/dashboard", methods=["GET", "POST"])
 @admin_required
 @csrf.exempt
@@ -359,10 +369,9 @@ def not_found(error):
 
 @app.errorhandler(405)
 def method_not_allowed(error):
-    # ✅ 405 hatasını yakala ve anlamlı mesaj döndür
     if request.path.startswith('/upload') or request.path.startswith('/status') or request.is_json:
         return jsonify({"error": "Bu endpoint sadece POST/GET destekler"}), 405
-    flash("Yöntem desteklenmiyor. Lütfen linki kontrol edin.", "error")
+    flash("Yöntem desteklenmiyor.", "error")
     return redirect(url_for("home"))
 
 @app.errorhandler(400)
