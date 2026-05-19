@@ -2,8 +2,6 @@ import os, uuid, traceback, threading, time, json, csv, io
 from datetime import datetime
 from flask import Flask, request, jsonify, render_template, redirect, url_for, flash, session, Response
 from flask_sqlalchemy import SQLAlchemy
-from flask_admin import Admin, AdminIndexView, expose
-from flask_admin.contrib.sqla import ModelView
 from flask_talisman import Talisman
 from flask_wtf import CSRFProtect
 from werkzeug.security import generate_password_hash, check_password_hash
@@ -45,12 +43,6 @@ Talisman(app, force_https=False, content_security_policy=csp)
 # 🛡️ CSRF Koruması
 csrf = CSRFProtect(app)
 db = SQLAlchemy(app)
-
-# ✅ CSRF'yi /admin/* rotaları için devre dışı bırak (Flask-Admin uyumluluğu için)
-@app.before_request
-def exempt_admin_from_csrf():
-    if request.path.startswith('/admin'):
-        csrf._exempt_views.add(request.endpoint)
 
 # ️ MODELLER
 class AdminUser(db.Model):
@@ -95,79 +87,17 @@ class AuditLog(db.Model):
     ip_address = db.Column(db.String(45))
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
 
-# 🔐 ADMIN PANEL - ROBUST AUTH
-class SecureAdminIndexView(AdminIndexView):
-    def is_accessible(self):
-        return session.get("admin_logged_in")
-    
-    def inaccessible_callback(self, name, **kwargs):
-        return redirect(url_for(".login"))
-    
-    @expose("/")
-    def index(self):
+# 🔐 ADMIN AUTH (Basit ve Stabil)
+def admin_required(f):
+    """Admin yetkilendirme dekoratörü"""
+    from functools import wraps
+    @wraps(f)
+    def decorated_function(*args, **kwargs):
         if not session.get("admin_logged_in"):
-            return redirect(url_for(".login"))
-        return super().index()
-    
-    @expose("/login", methods=["GET", "POST"])
-    def login(self):
-        if request.method == "POST":
-            username = request.form.get("username")
-            password = request.form.get("password")
-            user = AdminUser.query.filter_by(username=username).first()
-            
-            if user and user.check_password(password) and user.is_active:
-                session["admin_logged_in"] = True
-                session["admin_user"] = user.username
-                session.permanent = True
-                try:
-                    log = AuditLog(action="ADMIN_LOGIN", ip_address=request.remote_addr)
-                    db.session.add(log)
-                    db.session.commit()
-                except Exception as e:
-                    db.session.rollback()
-                    print(f"⚠️ Audit log hatası: {e}")
-                flash("Giriş başarılı.", "success")
-                return redirect(url_for(".index"))
-            else:
-                flash("Geçersiz kullanıcı adı veya şifre.", "error")
-        return self.render("admin/login.html")
-    
-    @expose("/logout")
-    def logout(self):
-        session.pop("admin_logged_in", None)
-        session.pop("admin_user", None)
-        return redirect(url_for(".login"))
-
-# 🔐 Admin View için özel ModelView
-class SecureModelView(ModelView):
-    def is_accessible(self):
-        return session.get("admin_logged_in")
-    
-    def inaccessible_callback(self, name, **kwargs):
-        flash("Lütfen önce giriş yapın.", "error")
-        return redirect(url_for("admin.login"))
-
-class UploadModelView(SecureModelView):
-    column_list = ("id", "original_name", "risk_level", "cancer_ratio", "image_dimensions", "confidence_score", "uploaded_at", "status")
-    column_searchable_list = ("original_name", "risk_level")
-    column_filters = ("risk_level", "uploaded_at")
-    can_create = False
-    can_edit = False
-    can_delete = False
-    column_labels = {
-        "original_name": "Orijinal İsim",
-        "risk_level": "Risk Seviyesi",
-        "cancer_ratio": "Kanser Oranı",
-        "image_dimensions": "Boyut",
-        "confidence_score": "Güven Skoru",
-        "uploaded_at": "Tarih",
-        "status": "Durum"
-    }
-
-# Admin'i başlat
-admin = Admin(app, name="Histopathology Admin", template_mode="bootstrap4", index_view=SecureAdminIndexView())
-admin.add_view(UploadModelView(ImageUpload, db.session, name="Görüntü Analizleri"))
+            flash("Lütfen önce giriş yapın.", "error")
+            return redirect(url_for("admin_login"))
+        return f(*args, **kwargs)
+    return decorated_function
 
 # 🛡️ YARDIMCI FONKSİYONLAR
 def log_audit(action, details="", ip_address=None):
@@ -216,6 +146,38 @@ def is_likely_histopathology(image_array):
 @app.route("/")
 def home():
     return render_template("index.html")
+
+@app.route("/admin/login", methods=["GET", "POST"])
+def admin_login():
+    """Basit admin login"""
+    if request.method == "POST":
+        username = request.form.get("username")
+        password = request.form.get("password")
+        user = AdminUser.query.filter_by(username=username).first()
+        
+        if user and user.check_password(password) and user.is_active:
+            session["admin_logged_in"] = True
+            session["admin_user"] = user.username
+            session.permanent = True
+            try:
+                log = AuditLog(action="ADMIN_LOGIN", ip_address=request.remote_addr)
+                db.session.add(log)
+                db.session.commit()
+            except Exception as e:
+                db.session.rollback()
+                print(f"⚠️ Audit log hatası: {e}")
+            flash("Giriş başarılı.", "success")
+            return redirect(url_for("dashboard"))
+        else:
+            flash("Geçersiz kullanıcı adı veya şifre.", "error")
+    return render_template("admin/login.html")
+
+@app.route("/admin/logout")
+def admin_logout():
+    session.pop("admin_logged_in", None)
+    session.pop("admin_user", None)
+    flash("Çıkış yapıldı.", "success")
+    return redirect(url_for("home"))
 
 @app.route("/upload", methods=["POST"])
 @csrf.exempt
@@ -329,10 +291,9 @@ def get_status(job_id):
         return jsonify({"error": f"Status hatası: {str(e)}"}), 500
 
 @app.route("/admin/export/csv")
+@admin_required
 @csrf.exempt
 def export_csv():
-    if not session.get("admin_logged_in"):
-        return jsonify({"error": "Unauthorized"}), 401
     uploads = ImageUpload.query.all()
     output = io.StringIO()
     writer = csv.writer(output)
@@ -342,10 +303,9 @@ def export_csv():
     return Response(output.getvalue(), mimetype="text/csv; charset=utf-8", headers={"Content-Disposition": f"attachment;filename=analizler_{datetime.now().strftime('%Y%m%d')}.csv"})
 
 @app.route("/dashboard")
+@admin_required
 @csrf.exempt
 def dashboard():
-    if not session.get("admin_logged_in"):
-        return redirect(url_for("admin.login"))
     total = ImageUpload.query.count()
     high_risk = ImageUpload.query.filter_by(risk_level="yüksek").count()
     medium_risk = ImageUpload.query.filter_by(risk_level="orta").count()
