@@ -1,7 +1,7 @@
 import os, uuid, traceback, threading, time, json, csv, io
 from datetime import datetime, timedelta
 from functools import wraps
-from flask import Flask, request, jsonify, render_template, redirect, url_for, flash, session, Response, abort  # ✅ abort eklendi
+from flask import Flask, request, jsonify, render_template, redirect, url_for, flash, session, Response, abort
 from flask_sqlalchemy import SQLAlchemy
 from flask_talisman import Talisman
 from flask_wtf import CSRFProtect
@@ -15,11 +15,11 @@ app.config["MAX_CONTENT_LENGTH"] = 32 * 1024 * 1024
 app.config["SQLALCHEMY_DATABASE_URI"] = os.environ.get("DATABASE_URL")
 app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
 
-# 🔐 Session & Security Config
+# 🔐 Session & Security Config (Render için optimize)
 app.config["SECRET_KEY"] = os.environ.get("SECRET_KEY", os.urandom(32).hex())
-app.config["SESSION_COOKIE_SECURE"] = True
+app.config["SESSION_COOKIE_SECURE"] = False  # Render proxy'si nedeniyle False yaptık (HTTPS zaten zorunlu)
 app.config["SESSION_COOKIE_HTTPONLY"] = True
-app.config["SESSION_COOKIE_SAMESITE"] = "Lax"
+app.config["SESSION_COOKIE_SAMESITE"] = "Lax"  # Cross-site redirect için Lax
 app.config["PERMANENT_SESSION_LIFETIME"] = timedelta(hours=24)
 
 # 🔹 PostgreSQL (Neon) Optimizasyonu
@@ -36,7 +36,7 @@ os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 app.static_folder = 'static'
 app.static_url_path = '/static'
 
-# 🔒 Talisman CSP
+# 🔒 Talisman CSP (Proxy ayarları)
 csp = {
     'default-src': "'self'",
     'style-src': ["'self'", "'unsafe-inline'", "https://fonts.googleapis.com"],
@@ -45,7 +45,8 @@ csp = {
     'font-src': ["'self'", "https://fonts.googleapis.com", "https://fonts.gstatic.com"],
     'connect-src': "'self'"
 }
-Talisman(app, force_https=False, content_security_policy=csp)
+# proxy_count=1: Render'ın proxy'sini dikkate al
+Talisman(app, force_https=False, content_security_policy=csp, proxy_count=1)
 
 # 🛡️ CSRF Koruması
 csrf = CSRFProtect(app)
@@ -79,7 +80,6 @@ class ImageUpload(db.Model):
     cancer_patches = db.Column(db.Integer)
     processing_time_ms = db.Column(db.Integer)
     status = db.Column(db.String(20), default="completed")
-    # ✅ Yeni sütunlar
     image_dimensions = db.Column(db.String(20))
     confidence_score = db.Column(db.Float)
     patch_details = db.Column(db.Text)
@@ -98,6 +98,7 @@ def admin_required(f):
     @wraps(f)
     def decorated_function(*args, **kwargs):
         if not session.get("admin_logged_in"):
+            print(f"⚠️ Yetkisiz erişim denemesi: {request.path}, session: {session.get('admin_logged_in')}")
             flash("Lütfen önce giriş yapın.", "error")
             return redirect(url_for("admin_login"))
         return f(*args, **kwargs)
@@ -146,45 +147,30 @@ def is_likely_histopathology(image_array):
     except Exception as e:
         return False, f"Doku analizi hatası: {str(e)}"
 
-# 🚀 VERİTABANI MIGRATION (Sütun Ekleme)
+# 🚀 VERİTABANI MIGRATION
 def migrate_database():
-    """PostgreSQL tablosuna eksik sütunları ekler"""
     with app.app_context():
         try:
-            # db.create_all() sadece tablo yoksa oluşturur, sütun eklemez.
-            # Bu yüzden manuel ALTER TABLE kullanıyoruz.
             conn = db.engine.raw_connection()
             cursor = conn.cursor()
-            
-            # Sütunları kontrol et ve ekle
             columns_to_add = {
                 "image_dimensions": "VARCHAR(20)",
                 "confidence_score": "FLOAT",
                 "patch_details": "TEXT",
                 "reviewed_by": "VARCHAR(50)"
             }
-            
-            # Mevcut sütunları sorgula
-            cursor.execute("""
-                SELECT column_name FROM information_schema.columns 
-                WHERE table_name = 'uploads'
-            """)
+            cursor.execute("SELECT column_name FROM information_schema.columns WHERE table_name = 'uploads'")
             existing_cols = [row[0] for row in cursor.fetchall()]
-            
-            # Eksikleri ekle
             for col_name, col_type in columns_to_add.items():
                 if col_name not in existing_cols:
                     print(f"🔧 Eksik sütun ekleniyor: {col_name} {col_type}")
                     cursor.execute(f'ALTER TABLE uploads ADD COLUMN IF NOT EXISTS {col_name} {col_type}')
                     conn.commit()
-            
             cursor.close()
             conn.close()
             print("✅ Veritabanı migration tamamlandı.")
-            
         except Exception as e:
             print(f"⚠️ Migration hatası: {e}")
-            # Hata olsa bile uygulamanın çökmemesi için devam et
 
 # 🌐 ROUTES
 @app.route("/")
@@ -194,7 +180,7 @@ def home():
 @app.route("/admin/login", methods=["GET", "POST"])
 @csrf.exempt
 def admin_login():
-    print(f"🔍 Login isteği: {request.method}")
+    print(f"🔍 Login isteği: {request.method}, session öncesi: {session.get('admin_logged_in')}")
     
     if request.method == "POST":
         username = request.form.get("username")
@@ -215,6 +201,9 @@ def admin_login():
                 session["admin_user"] = username
                 session.permanent = True
                 
+                # Session cookie ayarlarını request context'inde güncelle
+                session.modified = True
+                
                 try:
                     log = AuditLog(action="ADMIN_LOGIN", ip_address=request.remote_addr)
                     db.session.add(log)
@@ -225,6 +214,11 @@ def admin_login():
                     print(f"⚠️ Audit log hatası: {log_err}")
                 
                 flash("Giriş başarılı.", "success")
+                
+                # ✅ Debug: Session durumunu logla
+                print(f"🍪 Session cookie ayarları: Secure={app.config['SESSION_COOKIE_SECURE']}, SameSite={app.config['SESSION_COOKIE_SAMESITE']}")
+                print(f"🔑 Session içeriği: {dict(session)}")
+                
                 response = redirect("/dashboard", code=302)
                 print("🚀 Dashboard'a yönlendiriliyor...")
                 return response
@@ -380,6 +374,7 @@ def export_csv():
 @csrf.exempt
 def dashboard():
     try:
+        print(f"📊 Dashboard erişimi, session: {session.get('admin_logged_in')}")
         total = ImageUpload.query.count()
         high_risk = ImageUpload.query.filter_by(risk_level="yüksek").count()
         medium_risk = ImageUpload.query.filter_by(risk_level="orta").count()
@@ -403,7 +398,7 @@ def internal_error(error):
 def not_found(error):
     if request.path.startswith('/upload') or request.path.startswith('/status') or request.is_json:
         return jsonify({"error": "Endpoint bulunamadı"}), 404
-    return abort(404)  # ✅ abort artık tanımlı
+    return abort(404)
 
 @app.errorhandler(405)
 def method_not_allowed(error):
@@ -420,8 +415,6 @@ def bad_request(error):
 
 # 🚀 BAŞLANGIÇ
 if __name__ == "__main__":
-    # ✅ Migration'ı çalıştır (Tablo sütunlarını güncelle)
     migrate_database()
-    
     port = int(os.environ.get("PORT", 5000))
     app.run(host="0.0.0.0", port=port, debug=False)
