@@ -3,111 +3,328 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Dashboard - Histopathology Admin</title>
-    <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
+    <title>Dashboard - Histopathology AI</title>
+    
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    
+    <!-- Chart.js -->
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    
+    <!-- Font Awesome -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    
+    <!-- Google Fonts -->
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    fontFamily: {
+                        sans: ['Inter', 'sans-serif'],
+                    },
+                    colors: {
+                        primary: '#053BDB',
+                        secondary: '#4E04DC',
+                        accent: '#00D4C4',
+                        medical: {
+                            50: '#f0f9ff',
+                            100: '#e0f2fe',
+                            500: '#0ea5e9',
+                            600: '#0284c7',
+                            700: '#0369a1',
+                        }
+                    }
+                }
+            }
+        }
+    </script>
+    
+    <style>
+        body {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+        }
+        .glass-effect {
+            background: rgba(255, 255, 255, 0.95);
+            backdrop-filter: blur(10px);
+        }
+        .sidebar-gradient {
+            background: linear-gradient(180deg, #1e293b 0%, #0f172a 100%);
+        }
+        .card-hover {
+            transition: all 0.3s ease;
+        }
+        .card-hover:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 20px 40px rgba(0,0,0,0.1);
+        }
+        .stat-card {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        }
+        .stat-card.high-risk {
+            background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);
+        }
+        .stat-card.today {
+            background: linear-gradient(135deg, #4facfe 0%, #00f2fe 100%);
+        }
+        .stat-card.avg {
+            background: linear-gradient(135deg, #43e97b 0%, #38f9d7 100%);
+        }
+        .fade-in {
+            animation: fadeIn 0.5s ease-in;
+        }
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(20px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+    </style>
 </head>
-<body class="bg-gray-100">
-    <div class="flex h-screen">
+<body class="font-sans antialiased">
+    <div class="flex h-screen overflow-hidden">
         <!-- Sidebar -->
-        <aside class="w-64 bg-gray-900 text-white flex-shrink-0">
-            <div class="p-6">
-                <h1 class="text-2xl font-bold">🔬 Admin Panel</h1>
+        <aside class="sidebar-gradient w-72 flex-shrink-0 text-white hidden md:block shadow-2xl">
+            <div class="p-6 border-b border-gray-700">
+                <div class="flex items-center space-x-3">
+                    <div class="w-12 h-12 bg-gradient-to-br from-blue-400 to-purple-600 rounded-xl flex items-center justify-center shadow-lg">
+                        <i class="fas fa-microscope text-2xl"></i>
+                    </div>
+                    <div>
+                        <h1 class="text-xl font-bold bg-gradient-to-r from-blue-400 to-purple-400 bg-clip-text text-transparent">
+                            Histopathology
+                        </h1>
+                        <p class="text-xs text-gray-400">AI Analysis System</p>
+                    </div>
+                </div>
             </div>
-            <nav class="mt-6">
-                <!-- ✅ Dashboard (aktif sayfa) -->
-                <a href="/dashboard" class="block py-3 px-6 bg-gray-800 border-l-4 border-blue-500">📊 Dashboard</a>
+            
+            <nav class="p-4 space-y-2">
+                <a href="/dashboard" class="flex items-center space-x-3 px-4 py-3 bg-gradient-to-r from-blue-600 to-blue-700 rounded-xl shadow-lg transform transition hover:scale-105">
+                    <i class="fas fa-chart-line text-lg"></i>
+                    <span class="font-medium">Dashboard</span>
+                </a>
                 
-                <!-- ✅ CSV Export -->
-                <a href="/admin/export/csv" class="block py-3 px-6 hover:bg-gray-800">📥 CSV İndir</a>
+                <a href="/admin/export/csv" class="flex items-center space-x-3 px-4 py-3 hover:bg-gray-800 rounded-xl transition-all duration-200 group">
+                    <i class="fas fa-file-csv text-green-400 group-hover:scale-110 transition-transform"></i>
+                    <span class="font-medium">CSV İndir</span>
+                </a>
                 
-                <!-- ✅ Ana Sayfa -->
-                <a href="/" class="block py-3 px-6 hover:bg-gray-800">🏠 Ana Sayfa</a>
+                <a href="/" class="flex items-center space-x-3 px-4 py-3 hover:bg-gray-800 rounded-xl transition-all duration-200 group">
+                    <i class="fas fa-home text-blue-400 group-hover:scale-110 transition-transform"></i>
+                    <span class="font-medium">Ana Sayfa</span>
+                </a>
                 
-                <!-- ✅ Logout -->
-                <a href="/admin/logout" class="block py-3 px-6 hover:bg-red-700">🚪 Çıkış</a>
+                <a href="/admin/logout" class="flex items-center space-x-3 px-4 py-3 hover:bg-red-600/20 rounded-xl transition-all duration-200 group text-red-400 hover:text-red-300">
+                    <i class="fas fa-sign-out-alt group-hover:scale-110 transition-transform"></i>
+                    <span class="font-medium">Çıkış</span>
+                </a>
             </nav>
+            
+            <div class="absolute bottom-0 left-0 right-0 p-4 border-t border-gray-700">
+                <div class="flex items-center space-x-3 px-4 py-3">
+                    <div class="w-10 h-10 bg-gradient-to-br from-purple-400 to-pink-400 rounded-full flex items-center justify-center">
+                        <i class="fas fa-user text-sm"></i>
+                    </div>
+                    <div class="flex-1">
+                        <p class="text-sm font-medium">Admin</p>
+                        <p class="text-xs text-gray-400">Çevrimiçi</p>
+                    </div>
+                </div>
+            </div>
         </aside>
 
         <!-- Main Content -->
-        <main class="flex-1 overflow-y-auto p-8">
-            <h2 class="text-3xl font-bold mb-8 text-gray-800">Dashboard</h2>
-            
-            <!-- Stats Cards -->
-            <div class="grid grid-cols-1 md:grid-cols-4 gap-6 mb-8">
-                <div class="bg-white rounded-lg shadow p-6">
-                    <div class="text-gray-500 text-sm">Toplam Analiz</div>
-                    <div class="text-3xl font-bold text-gray-800">{{ stats.total }}</div>
-                </div>
-                <div class="bg-white rounded-lg shadow p-6">
-                    <div class="text-gray-500 text-sm">Yüksek Risk</div>
-                    <div class="text-3xl font-bold text-red-600">{{ stats.high_risk }}</div>
-                </div>
-                <div class="bg-white rounded-lg shadow p-6">
-                    <div class="text-gray-500 text-sm">Bugün</div>
-                    <div class="text-3xl font-bold text-blue-600">{{ stats.today }}</div>
-                </div>
-                <div class="bg-white rounded-lg shadow p-6">
-                    <div class="text-gray-500 text-sm">Ortalama Risk</div>
-                    <div class="text-3xl font-bold text-green-600">
-                        {{ "%.1f"|format((stats.high_risk * 3 + stats.medium_risk * 2 + stats.low_risk) / (stats.total or 1)) }}
+        <main class="flex-1 overflow-y-auto">
+            <!-- Top Bar -->
+            <div class="glass-effect shadow-sm border-b border-gray-200">
+                <div class="px-8 py-4 flex items-center justify-between">
+                    <div>
+                        <h2 class="text-2xl font-bold text-gray-800">Dashboard</h2>
+                        <p class="text-sm text-gray-500 mt-1">Histopatolojik Analiz İstatistikleri</p>
+                    </div>
+                    <div class="flex items-center space-x-4">
+                        <div class="px-4 py-2 bg-gradient-to-r from-blue-500 to-purple-600 text-white rounded-lg shadow-lg">
+                            <i class="fas fa-calendar-alt mr-2"></i>
+                            <span class="text-sm font-medium">{{ stats.today }} Analiz - Bugün</span>
+                        </div>
                     </div>
                 </div>
             </div>
 
-            <!-- Chart -->
-            <div class="bg-white rounded-lg shadow p-6 mb-8">
-                <h2 class="text-xl font-bold mb-4">Risk Dağılımı</h2>
-                <canvas id="riskChart" height="200"></canvas>
-            </div>
+            <div class="p-8">
+                <!-- Stats Cards -->
+                <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
+                    <!-- Total Analyses -->
+                    <div class="stat-card rounded-2xl p-6 text-white shadow-xl card-hover fade-in">
+                        <div class="flex items-center justify-between">
+                            <div>
+                                <p class="text-sm opacity-90 mb-1">Toplam Analiz</p>
+                                <h3 class="text-4xl font-bold">{{ stats.total }}</h3>
+                                <p class="text-sm opacity-75 mt-2">Tüm zamanlar</p>
+                            </div>
+                            <div class="w-16 h-16 bg-white/20 rounded-2xl flex items-center justify-center backdrop-blur-sm">
+                                <i class="fas fa-dna text-3xl"></i>
+                            </div>
+                        </div>
+                    </div>
 
-            <!-- Recent Analyses Table -->
-            <div class="bg-white rounded-lg shadow overflow-hidden">
-                <div class="px-6 py-4 border-b">
-                    <h2 class="text-xl font-bold">Son 10 Analiz</h2>
+                    <!-- High Risk -->
+                    <div class="stat-card high-risk rounded-2xl p-6 text-white shadow-xl card-hover fade-in" style="animation-delay: 0.1s">
+                        <div class="flex items-center justify-between">
+                            <div>
+                                <p class="text-sm opacity-90 mb-1">Yüksek Risk</p>
+                                <h3 class="text-4xl font-bold">{{ stats.high_risk }}</h3>
+                                <p class="text-sm opacity-75 mt-2">Acil inceleme</p>
+                            </div>
+                            <div class="w-16 h-16 bg-white/20 rounded-2xl flex items-center justify-center backdrop-blur-sm">
+                                <i class="fas fa-exclamation-triangle text-3xl"></i>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Today -->
+                    <div class="stat-card today rounded-2xl p-6 text-white shadow-xl card-hover fade-in" style="animation-delay: 0.2s">
+                        <div class="flex items-center justify-between">
+                            <div>
+                                <p class="text-sm opacity-90 mb-1">Bugün</p>
+                                <h3 class="text-4xl font-bold">{{ stats.today }}</h3>
+                                <p class="text-sm opacity-75 mt-2">Güncel analiz</p>
+                            </div>
+                            <div class="w-16 h-16 bg-white/20 rounded-2xl flex items-center justify-center backdrop-blur-sm">
+                                <i class="fas fa-clock text-3xl"></i>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Average Risk -->
+                    <div class="stat-card avg rounded-2xl p-6 text-white shadow-xl card-hover fade-in" style="animation-delay: 0.3s">
+                        <div class="flex items-center justify-between">
+                            <div>
+                                <p class="text-sm opacity-90 mb-1">Ortalama Risk</p>
+                                <h3 class="text-4xl font-bold">{{ "%.1f"|format((stats.high_risk * 3 + stats.medium_risk * 2 + stats.low_risk) / (stats.total or 1)) }}</h3>
+                                <p class="text-sm opacity-75 mt-2">Risk skoru</p>
+                            </div>
+                            <div class="w-16 h-16 bg-white/20 rounded-2xl flex items-center justify-center backdrop-blur-sm">
+                                <i class="fas fa-chart-pie text-3xl"></i>
+                            </div>
+                        </div>
+                    </div>
                 </div>
-                <div class="overflow-x-auto">
-                    <table class="min-w-full">
-                        <thead class="bg-gray-50">
-                            <tr>
-                                <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">ID</th>
-                                <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Dosya</th>
-                                <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Boyut</th>
-                                <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Risk</th>
-                                <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Oran</th>
-                                <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Güven</th>
-                                <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">İnceleyen</th>
-                                <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Tarih</th>
-                            </tr>
-                        </thead>
-                        <tbody class="divide-y divide-gray-200">
-                            {% for upload in recent %}
-                            <tr class="hover:bg-gray-50">
-                                <td class="px-6 py-4">{{ upload.id }}</td>
-                                <td class="px-6 py-4 max-w-xs truncate">{{ upload.original_name }}</td>
-                                <td class="px-6 py-4 text-sm text-gray-600">{{ upload.image_dimensions or 'N/A' }}</td>
-                                <td class="px-6 py-4">
-                                    <span class="px-2 py-1 rounded-full text-xs font-semibold
-                                        {% if upload.risk_level == 'yüksek' %}bg-red-100 text-red-800
-                                        {% elif upload.risk_level == 'orta' %}bg-yellow-100 text-yellow-800
-                                        {% else %}bg-green-100 text-green-800{% endif %}">
-                                        {{ upload.risk_level.upper() }}
-                                    </span>
-                                </td>
-                                <td class="px-6 py-4">%{{ upload.cancer_ratio }}</td>
-                                <td class="px-6 py-4">{{ "%.1f"|format(upload.confidence_score * 100) if upload.confidence_score else 'N/A' }}%</td>
-                                <td class="px-6 py-4 text-sm">{{ upload.reviewed_by or '-' }}</td>
-                                <td class="px-6 py-4 text-sm text-gray-600">{{ upload.uploaded_at.strftime('%d.%m.%Y %H:%M') }}</td>
-                            </tr>
-                            {% endfor %}
-                        </tbody>
-                    </table>
+
+                <!-- Charts & Table Section -->
+                <div class="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-8">
+                    <!-- Risk Distribution Chart -->
+                    <div class="lg:col-span-1 glass-effect rounded-2xl p-6 shadow-xl fade-in" style="animation-delay: 0.4s">
+                        <h3 class="text-lg font-bold text-gray-800 mb-4 flex items-center">
+                            <i class="fas fa-chart-pie text-purple-600 mr-2"></i>
+                            Risk Dağılımı
+                        </h3>
+                        <div class="relative h-64">
+                            <canvas id="riskChart"></canvas>
+                        </div>
+                        <div class="mt-4 space-y-2">
+                            <div class="flex items-center justify-between p-2 bg-red-50 rounded-lg">
+                                <span class="text-sm text-gray-600"><i class="fas fa-circle text-red-500 mr-2 text-xs"></i>Yüksek Risk</span>
+                                <span class="font-bold text-red-600">{{ stats.high_risk }}</span>
+                            </div>
+                            <div class="flex items-center justify-between p-2 bg-yellow-50 rounded-lg">
+                                <span class="text-sm text-gray-600"><i class="fas fa-circle text-yellow-500 mr-2 text-xs"></i>Orta Risk</span>
+                                <span class="font-bold text-yellow-600">{{ stats.medium_risk }}</span>
+                            </div>
+                            <div class="flex items-center justify-between p-2 bg-green-50 rounded-lg">
+                                <span class="text-sm text-gray-600"><i class="fas fa-circle text-green-500 mr-2 text-xs"></i>Düşük Risk</span>
+                                <span class="font-bold text-green-600">{{ stats.low_risk }}</span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Recent Analyses Table -->
+                    <div class="lg:col-span-2 glass-effect rounded-2xl shadow-xl overflow-hidden fade-in" style="animation-delay: 0.5s">
+                        <div class="p-6 border-b border-gray-200">
+                            <h3 class="text-lg font-bold text-gray-800 flex items-center">
+                                <i class="fas fa-history text-blue-600 mr-2"></i>
+                                Son 10 Analiz
+                            </h3>
+                        </div>
+                        <div class="overflow-x-auto">
+                            <table class="w-full">
+                                <thead class="bg-gradient-to-r from-blue-50 to-purple-50">
+                                    <tr>
+                                        <th class="px-6 py-4 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">ID</th>
+                                        <th class="px-6 py-4 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">Dosya</th>
+                                        <th class="px-6 py-4 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">Risk</th>
+                                        <th class="px-6 py-4 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">Oran</th>
+                                        <th class="px-6 py-4 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">Güven</th>
+                                        <th class="px-6 py-4 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">Tarih</th>
+                                    </tr>
+                                </thead>
+                                <tbody class="divide-y divide-gray-200">
+                                    {% for upload in recent %}
+                                    <tr class="hover:bg-gray-50 transition-colors">
+                                        <td class="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">#{{ upload.id }}</td>
+                                        <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-600">
+                                            <div class="flex items-center">
+                                                <i class="fas fa-file-image text-blue-500 mr-2"></i>
+                                                <span class="truncate max-w-xs">{{ upload.original_name }}</span>
+                                            </div>
+                                        </td>
+                                        <td class="px-6 py-4 whitespace-nowrap">
+                                            {% if upload.risk_level == 'yüksek' %}
+                                                <span class="px-3 py-1 rounded-full text-xs font-semibold bg-red-100 text-red-700 border border-red-200">
+                                                    <i class="fas fa-exclamation-circle mr-1"></i>YÜKSEK
+                                                </span>
+                                            {% elif upload.risk_level == 'orta' %}
+                                                <span class="px-3 py-1 rounded-full text-xs font-semibold bg-yellow-100 text-yellow-700 border border-yellow-200">
+                                                    <i class="fas fa-exclamation-triangle mr-1"></i>ORTA
+                                                </span>
+                                            {% else %}
+                                                <span class="px-3 py-1 rounded-full text-xs font-semibold bg-green-100 text-green-700 border border-green-200">
+                                                    <i class="fas fa-check-circle mr-1"></i>DÜŞÜK
+                                                </span>
+                                            {% endif %}
+                                        </td>
+                                        <td class="px-6 py-4 whitespace-nowrap text-sm">
+                                            <div class="flex items-center">
+                                                <div class="w-16 bg-gray-200 rounded-full h-2 mr-2">
+                                                    <div class="bg-gradient-to-r from-blue-500 to-purple-600 h-2 rounded-full" style="width: {{ upload.cancer_ratio }}%"></div>
+                                                </div>
+                                                <span class="font-semibold text-gray-700">%{{ upload.cancer_ratio }}</span>
+                                            </div>
+                                        </td>
+                                        <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-600">
+                                            {% if upload.confidence_score %}
+                                                <span class="font-semibold text-purple-600">%{{ "%.1f"|format(upload.confidence_score * 100) }}</span>
+                                            {% else %}
+                                                <span class="text-gray-400">N/A</span>
+                                            {% endif %}
+                                        </td>
+                                        <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                                            <i class="far fa-clock mr-1"></i>
+                                            {{ upload.uploaded_at.strftime('%d.%m.%Y %H:%M') }}
+                                        </td>
+                                    </tr>
+                                    {% endfor %}
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
                 </div>
+
+                <!-- Footer -->
+                <footer class="text-center text-gray-500 text-sm py-4">
+                    <p>© 2026 Histopathology AI Analyzer | Akademik Prototip v1.0</p>
+                    <p class="mt-1 text-xs text-gray-400">
+                        <i class="fas fa-info-circle mr-1"></i>
+                        Bu sistem tıbbi teşhis koymaz, sadece tahmini risk analizi yapar.
+                    </p>
+                </footer>
             </div>
         </main>
     </div>
 
     <script>
+        // Risk Distribution Chart
         const ctx = document.getElementById('riskChart').getContext('2d');
         new Chart(ctx, {
             type: 'doughnut',
@@ -115,10 +332,41 @@
                 labels: ['Yüksek Risk', 'Orta Risk', 'Düşük Risk'],
                 datasets: [{
                     data: [{{ stats.high_risk }}, {{ stats.medium_risk }}, {{ stats.low_risk }}],
-                    backgroundColor: ['#ef4444', '#f59e0b', '#10b981']
+                    backgroundColor: [
+                        'rgba(239, 68, 68, 0.8)',
+                        'rgba(234, 179, 8, 0.8)',
+                        'rgba(34, 197, 94, 0.8)'
+                    ],
+                    borderColor: [
+                        'rgba(239, 68, 68, 1)',
+                        'rgba(234, 179, 8, 1)',
+                        'rgba(34, 197, 94, 1)'
+                    ],
+                    borderWidth: 2,
+                    hoverOffset: 10
                 }]
             },
-            options: { responsive: true, maintainAspectRatio: false }
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: {
+                    legend: {
+                        display: false
+                    },
+                    tooltip: {
+                        callbacks: {
+                            label: function(context) {
+                                let label = context.label || '';
+                                let value = context.parsed;
+                                let total = context.dataset.data.reduce((a, b) => a + b, 0);
+                                let percentage = total > 0 ? ((value / total) * 100).toFixed(1) : 0;
+                                return label + ': ' + value + ' (' + percentage + '%)';
+                            }
+                        }
+                    }
+                },
+                cutout: '70%'
+            }
         });
     </script>
 </body>
