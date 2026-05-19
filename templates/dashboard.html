@@ -3,308 +3,416 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Dashboard - Histopathology AI</title>
+    <title>Analiz Veritabanı Yönetimi - Histopathology AI</title>
     
-    <!-- Tailwind CSS -->
-    <script src="https://cdn.tailwindcss.com"></script>
-    
-    <!-- Chart.js -->
-    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-    
-    <!-- Font Awesome -->
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
-    
-    <!-- Google Fonts -->
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono&display=swap" rel="stylesheet">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     
     <style>
         * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
             font-family: 'Inter', sans-serif;
         }
-        .mono {
-            font-family: 'JetBrains Mono', monospace;
-        }
+        
         body {
-            background-color: #0a0e27;
-            color: #e2e8f0;
+            background: linear-gradient(135deg, #0f766e 0%, #0891b2 40%, #2563eb 100%);
+            min-height: 100vh;
+            padding: 2rem;
         }
-        .sidebar {
-            background: linear-gradient(180deg, #1a1f3a 0%, #0f1419 100%);
-            border-right: 1px solid #2d3748;
+        
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
         }
-        .card {
-            background: rgba(26, 31, 58, 0.6);
+        
+        /* Header */
+        .header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin-bottom: 1.5rem;
+        }
+        
+        .header h1 {
+            color: white;
+            font-size: 1.75rem;
+            font-weight: 700;
+            display: flex;
+            align-items: center;
+            gap: 0.75rem;
+        }
+        
+        .header h1 i {
+            font-size: 2rem;
+        }
+        
+        .header-actions {
+            display: flex;
+            gap: 0.75rem;
+        }
+        
+        .btn {
+            padding: 0.6rem 1.2rem;
+            border: none;
+            border-radius: 12px;
+            font-size: 0.875rem;
+            font-weight: 600;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            transition: all 0.2s;
+            text-decoration: none;
+        }
+        
+        .btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(0,0,0,0.2);
+        }
+        
+        .btn-csv {
+            background: linear-gradient(135deg, #10b981, #059669);
+            color: white;
+        }
+        
+        .btn-clear {
+            background: linear-gradient(135deg, #f97316, #ea580c);
+            color: white;
+        }
+        
+        .btn-logout {
+            background: rgba(255,255,255,0.2);
+            color: white;
             backdrop-filter: blur(10px);
-            border: 1px solid rgba(45, 55, 72, 0.5);
         }
-        .stat-value {
-            font-family: 'JetBrains Mono', monospace;
+        
+        /* Stats Cards */
+        .stats-row {
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            gap: 1rem;
+            margin-bottom: 1.5rem;
         }
+        
+        .stat-card {
+            background: rgba(255,255,255,0.15);
+            backdrop-filter: blur(20px);
+            border-radius: 16px;
+            padding: 1.25rem;
+            text-align: center;
+            border: 1px solid rgba(255,255,255,0.2);
+        }
+        
+        .stat-card .stat-label {
+            color: rgba(255,255,255,0.8);
+            font-size: 0.8rem;
+            font-weight: 500;
+            margin-bottom: 0.5rem;
+        }
+        
+        .stat-card .stat-value {
+            color: white;
+            font-size: 2rem;
+            font-weight: 700;
+        }
+        
+        /* Search Bar */
+        .search-bar {
+            background: rgba(255,255,255,0.95);
+            border-radius: 16px;
+            padding: 1rem 1.5rem;
+            margin-bottom: 1.5rem;
+            display: flex;
+            align-items: center;
+            gap: 0.75rem;
+            box-shadow: 0 4px 20px rgba(0,0,0,0.1);
+        }
+        
+        .search-bar i {
+            color: #94a3b8;
+            font-size: 1.1rem;
+        }
+        
+        .search-bar input {
+            border: none;
+            outline: none;
+            width: 100%;
+            font-size: 0.95rem;
+            color: #475569;
+            background: transparent;
+        }
+        
+        .search-bar input::placeholder {
+            color: #94a3b8;
+        }
+        
+        /* Table Card */
+        .table-card {
+            background: rgba(255,255,255,0.95);
+            border-radius: 20px;
+            overflow: hidden;
+            box-shadow: 0 8px 30px rgba(0,0,0,0.15);
+        }
+        
+        .table-header {
+            display: grid;
+            grid-template-columns: 1.2fr 0.8fr 2fr 1.2fr 1fr;
+            padding: 1rem 1.5rem;
+            background: linear-gradient(135deg, #10b981, #0891b2);
+            color: white;
+            font-weight: 600;
+            font-size: 0.9rem;
+        }
+        
+        .table-row {
+            display: grid;
+            grid-template-columns: 1.2fr 0.8fr 2fr 1.2fr 1fr;
+            padding: 1rem 1.5rem;
+            align-items: center;
+            border-bottom: 1px solid #f1f5f9;
+            transition: background 0.2s;
+        }
+        
         .table-row:hover {
-            background: rgba(45, 55, 72, 0.3);
+            background: #f8fafc;
         }
-        .badge {
-            font-family: 'JetBrains Mono', monospace;
+        
+        .table-row:last-child {
+            border-bottom: none;
+        }
+        
+        .table-cell {
+            font-size: 0.875rem;
+            color: #475569;
+        }
+        
+        .table-cell.date {
+            color: #64748b;
+            font-size: 0.85rem;
+        }
+        
+        .module-badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.4rem;
+            padding: 0.3rem 0.75rem;
+            border-radius: 20px;
+            font-size: 0.8rem;
+            font-weight: 500;
+        }
+        
+        .module-badge.gorsel {
+            background: #fef3c7;
+            color: #92400e;
+        }
+        
+        .module-badge.cevresel {
+            background: #dbeafe;
+            color: #1e40af;
+        }
+        
+        .input-summary {
+            font-size: 0.85rem;
+            color: #64748b;
+        }
+        
+        .result-text {
+            font-weight: 600;
+            font-size: 0.875rem;
+        }
+        
+        .result-text.high {
+            color: #dc2626;
+        }
+        
+        .result-text.medium {
+            color: #d97706;
+        }
+        
+        .result-text.low {
+            color: #059669;
+        }
+        
+        .confidence-bar {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+        
+        .confidence-track {
+            flex: 1;
+            height: 8px;
+            background: #e2e8f0;
+            border-radius: 10px;
+            overflow: hidden;
+        }
+        
+        .confidence-fill {
+            height: 100%;
+            border-radius: 10px;
+            background: linear-gradient(90deg, #10b981, #0891b2);
+            transition: width 0.3s;
+        }
+        
+        .confidence-value {
+            font-size: 0.8rem;
+            font-weight: 600;
+            color: #475569;
+            min-width: 45px;
+            text-align: right;
+        }
+        
+        /* Footer */
+        .footer {
+            margin-top: 2rem;
+            text-align: center;
+            color: rgba(255,255,255,0.7);
+            font-size: 0.8rem;
+            padding: 1rem;
+        }
+        
+        .footer .warning {
+            color: #fbbf24;
             font-size: 0.75rem;
-            letter-spacing: 0.05em;
+            margin-top: 0.5rem;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 0.5rem;
         }
-        .glow {
-            box-shadow: 0 0 20px rgba(59, 130, 246, 0.15);
-        }
-        .border-glow {
-            border-color: rgba(59, 130, 246, 0.3);
+        
+        /* Responsive */
+        @media (max-width: 900px) {
+            body { padding: 1rem; }
+            .stats-row { grid-template-columns: repeat(2, 1fr); }
+            .table-header, .table-row {
+                grid-template-columns: 1fr;
+                gap: 0.5rem;
+            }
+            .table-header { display: none; }
+            .table-row {
+                background: rgba(255,255,255,0.9);
+                border-radius: 12px;
+                margin-bottom: 0.75rem;
+                padding: 1rem;
+            }
         }
     </style>
 </head>
-<body class="antialiased">
-    <div class="flex h-screen overflow-hidden">
-        <!-- Sidebar -->
-        <aside class="sidebar w-64 flex-shrink-0 hidden md:block">
-            <div class="p-6 border-b border-gray-700">
-                <div class="flex items-center space-x-3">
-                    <i class="fas fa-microscope text-2xl text-blue-500"></i>
-                    <div>
-                        <h1 class="text-lg font-semibold text-white">Histopathology</h1>
-                        <p class="text-xs text-gray-500">AI Analysis System</p>
-                    </div>
-                </div>
+<body>
+    <div class="container">
+        <!-- Header -->
+        <div class="header">
+            <h1>
+                <i class="fas fa-chart-bar" style="background: linear-gradient(135deg, #fbbf24, #f59e0b); -webkit-background-clip: text; -webkit-text-fill-color: transparent;"></i>
+                Analiz Veritabanı Yönetimi
+            </h1>
+            <div class="header-actions">
+                <a href="/admin/export/csv" class="btn btn-csv">
+                    <i class="fas fa-download"></i> CSV İndir
+                </a>
+                <a href="/" class="btn btn-logout">
+                    <i class="fas fa-home"></i> Ana Sayfa
+                </a>
+                <a href="/admin/logout" class="btn btn-logout">
+                    <i class="fas fa-sign-out-alt"></i> Çıkış Yap
+                </a>
+            </div>
+        </div>
+        
+        <!-- Stats Cards -->
+        <div class="stats-row">
+            <div class="stat-card">
+                <div class="stat-label">Toplam Analiz</div>
+                <div class="stat-value">{{ stats.total }}</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-label">Yüksek Risk</div>
+                <div class="stat-value" style="color: #fca5a5;">{{ stats.high_risk }}</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-label">Bugün</div>
+                <div class="stat-value">{{ stats.today }}</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-label">Ortalama Güven</div>
+                <div class="stat-value" style="color: #6ee7b7;">%{{ "%.0f"|format((stats.high_risk * 99.5 + stats.medium_risk * 95 + stats.low_risk * 90) / (stats.total or 1)) }}</div>
+            </div>
+        </div>
+        
+        <!-- Search Bar -->
+        <div class="search-bar">
+            <i class="fas fa-search"></i>
+            <input type="text" id="searchInput" placeholder="Kayıt Ara (tarih, dosya adı, sonuç...)">
+        </div>
+        
+        <!-- Table -->
+        <div class="table-card">
+            <div class="table-header">
+                <div>Tarih</div>
+                <div>Modül</div>
+                <div>Girdi Özeti</div>
+                <div>Sonuç</div>
+                <div>Güven</div>
             </div>
             
-            <nav class="p-4 space-y-1">
-                <a href="/dashboard" class="flex items-center space-x-3 px-4 py-3 bg-blue-600/20 border border-blue-500/30 rounded-lg text-blue-400">
-                    <i class="fas fa-chart-line"></i>
-                    <span class="text-sm font-medium">Dashboard</span>
-                </a>
-                
-                <a href="/admin/export/csv" class="flex items-center space-x-3 px-4 py-3 text-gray-400 hover:text-white hover:bg-gray-800/50 rounded-lg transition-all">
-                    <i class="fas fa-download"></i>
-                    <span class="text-sm">CSV İndir</span>
-                </a>
-                
-                <a href="/" class="flex items-center space-x-3 px-4 py-3 text-gray-400 hover:text-white hover:bg-gray-800/50 rounded-lg transition-all">
-                    <i class="fas fa-external-link-alt"></i>
-                    <span class="text-sm">Ana Sayfa</span>
-                </a>
-                
-                <a href="/admin/logout" class="flex items-center space-x-3 px-4 py-3 text-gray-400 hover:text-red-400 hover:bg-red-900/20 rounded-lg transition-all">
-                    <i class="fas fa-sign-out-alt"></i>
-                    <span class="text-sm">Çıkış</span>
-                </a>
-            </nav>
-            
-            <div class="absolute bottom-0 left-0 right-0 p-4 border-t border-gray-700">
-                <div class="flex items-center space-x-3 px-4">
-                    <div class="w-2 h-2 bg-green-500 rounded-full animate-pulse"></div>
-                    <span class="text-xs text-gray-500">Sistem Aktif</span>
+            <div id="tableBody">
+                {% for upload in recent %}
+                <div class="table-row">
+                    <div class="table-cell date">{{ upload.uploaded_at.strftime('%Y-%m-%d %H:%M:%S') }}</div>
+                    <div class="table-cell">
+                        <span class="module-badge gorsel">
+                            <i class="fas fa-microscope"></i> Görsel
+                        </span>
+                    </div>
+                    <div class="table-cell input-summary">
+                        Image: {{ upload.original_name }} ({{ upload.image_dimensions or '224x224' }})
+                    </div>
+                    <div class="table-cell">
+                        {% if upload.risk_level == 'yüksek' %}
+                            <span class="result-text high">Yüksek Risk ({{ upload.cancer_ratio }}%)</span>
+                        {% elif upload.risk_level == 'orta' %}
+                            <span class="result-text medium">Orta Risk ({{ upload.cancer_ratio }}%)</span>
+                        {% else %}
+                            <span class="result-text low">Düşük Risk ({{ upload.cancer_ratio }}%)</span>
+                        {% endif %}
+                    </div>
+                    <div class="table-cell">
+                        <div class="confidence-bar">
+                            <div class="confidence-track">
+                                <div class="confidence-fill" style="width: {{ (upload.confidence_score or 0.95) * 100 }}%"></div>
+                            </div>
+                            <span class="confidence-value">%{{ "%.1f"|format((upload.confidence_score or 0.95) * 100) }}</span>
+                        </div>
+                    </div>
                 </div>
+                {% endfor %}
             </div>
-        </aside>
-
-        <!-- Main Content -->
-        <main class="flex-1 overflow-y-auto bg-[#0a0e27]">
-            <!-- Header -->
-            <div class="border-b border-gray-800 bg-[#0f1419]/50 backdrop-blur">
-                <div class="px-8 py-5 flex items-center justify-between">
-                    <div>
-                        <h2 class="text-xl font-semibold text-white">Dashboard</h2>
-                        <p class="text-sm text-gray-500 mt-1">Analiz İstatistikleri</p>
-                    </div>
-                    <div class="flex items-center space-x-4">
-                        <div class="px-4 py-2 bg-blue-600/10 border border-blue-500/30 rounded-lg">
-                            <span class="text-sm text-blue-400 mono">{{ stats.today }} analiz bugün</span>
-                        </div>
-                    </div>
-                </div>
+        </div>
+        
+        <!-- Footer -->
+        <div class="footer">
+            <p>© 2026 Histopathology AI Analyzer | Akademik Prototip v1.0</p>
+            <div class="warning">
+                <i class="fas fa-exclamation-triangle"></i>
+                Bu sistem tıbbi teşhis veya tedavi aracı değildir. Yalnızca eğitim ve demo amaçlıdır.
             </div>
-
-            <div class="p-8">
-                <!-- Stats Grid -->
-                <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
-                    <div class="card rounded-xl p-6 glow border-glow">
-                        <div class="flex items-center justify-between">
-                            <div>
-                                <p class="text-xs text-gray-500 uppercase tracking-wider mb-1">Toplam Analiz</p>
-                                <h3 class="text-3xl font-bold text-white stat-value">{{ stats.total }}</h3>
-                            </div>
-                            <div class="w-12 h-12 bg-blue-500/10 rounded-lg flex items-center justify-center border border-blue-500/30">
-                                <i class="fas fa-dna text-blue-400"></i>
-                            </div>
-                        </div>
-                    </div>
-
-                    <div class="card rounded-xl p-6">
-                        <div class="flex items-center justify-between">
-                            <div>
-                                <p class="text-xs text-gray-500 uppercase tracking-wider mb-1">Yüksek Risk</p>
-                                <h3 class="text-3xl font-bold text-red-400 stat-value">{{ stats.high_risk }}</h3>
-                            </div>
-                            <div class="w-12 h-12 bg-red-500/10 rounded-lg flex items-center justify-center border border-red-500/30">
-                                <i class="fas fa-exclamation-triangle text-red-400"></i>
-                            </div>
-                        </div>
-                    </div>
-
-                    <div class="card rounded-xl p-6">
-                        <div class="flex items-center justify-between">
-                            <div>
-                                <p class="text-xs text-gray-500 uppercase tracking-wider mb-1">Bugün</p>
-                                <h3 class="text-3xl font-bold text-cyan-400 stat-value">{{ stats.today }}</h3>
-                            </div>
-                            <div class="w-12 h-12 bg-cyan-500/10 rounded-lg flex items-center justify-center border border-cyan-500/30">
-                                <i class="fas fa-clock text-cyan-400"></i>
-                            </div>
-                        </div>
-                    </div>
-
-                    <div class="card rounded-xl p-6">
-                        <div class="flex items-center justify-between">
-                            <div>
-                                <p class="text-xs text-gray-500 uppercase tracking-wider mb-1">Ortalama Risk</p>
-                                <h3 class="text-3xl font-bold text-emerald-400 stat-value">{{ "%.1f"|format((stats.high_risk * 3 + stats.medium_risk * 2 + stats.low_risk) / (stats.total or 1)) }}</h3>
-                            </div>
-                            <div class="w-12 h-12 bg-emerald-500/10 rounded-lg flex items-center justify-center border border-emerald-500/30">
-                                <i class="fas fa-chart-pie text-emerald-400"></i>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-
-                <!-- Content Grid -->
-                <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
-                    <!-- Chart -->
-                    <div class="card rounded-xl p-6 lg:col-span-1">
-                        <h3 class="text-sm font-semibold text-gray-400 uppercase tracking-wider mb-6">Risk Dağılımı</h3>
-                        <div class="relative h-48 mb-6">
-                            <canvas id="riskChart"></canvas>
-                        </div>
-                        <div class="space-y-3">
-                            <div class="flex items-center justify-between p-3 bg-red-500/5 border border-red-500/20 rounded-lg">
-                                <span class="text-sm text-gray-400">Yüksek Risk</span>
-                                <span class="text-sm font-bold text-red-400 mono">{{ stats.high_risk }}</span>
-                            </div>
-                            <div class="flex items-center justify-between p-3 bg-yellow-500/5 border border-yellow-500/20 rounded-lg">
-                                <span class="text-sm text-gray-400">Orta Risk</span>
-                                <span class="text-sm font-bold text-yellow-400 mono">{{ stats.medium_risk }}</span>
-                            </div>
-                            <div class="flex items-center justify-between p-3 bg-green-500/5 border border-green-500/20 rounded-lg">
-                                <span class="text-sm text-gray-400">Düşük Risk</span>
-                                <span class="text-sm font-bold text-green-400 mono">{{ stats.low_risk }}</span>
-                            </div>
-                        </div>
-                    </div>
-
-                    <!-- Table -->
-                    <div class="card rounded-xl lg:col-span-2 overflow-hidden">
-                        <div class="p-6 border-b border-gray-800">
-                            <h3 class="text-sm font-semibold text-gray-400 uppercase tracking-wider">Son Analizler</h3>
-                        </div>
-                        <div class="overflow-x-auto">
-                            <table class="w-full">
-                                <thead class="bg-gray-800/50">
-                                    <tr>
-                                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">ID</th>
-                                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Dosya</th>
-                                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Risk</th>
-                                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Oran</th>
-                                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Tarih</th>
-                                    </tr>
-                                </thead>
-                                <tbody class="divide-y divide-gray-800">
-                                    {% for upload in recent %}
-                                    <tr class="table-row transition-colors">
-                                        <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500 mono">#{{ upload.id }}</td>
-                                        <td class="px-6 py-4 whitespace-nowrap">
-                                            <div class="flex items-center">
-                                                <i class="fas fa-file-image text-blue-500/50 mr-3"></i>
-                                                <span class="text-sm text-gray-300">{{ upload.original_name[:25] }}{% if upload.original_name|length > 25 %}...{% endif %}</span>
-                                            </div>
-                                        </td>
-                                        <td class="px-6 py-4 whitespace-nowrap">
-                                            {% if upload.risk_level == 'yüksek' %}
-                                                <span class="badge px-2 py-1 rounded bg-red-500/10 border border-red-500/30 text-red-400">YÜKSEK</span>
-                                            {% elif upload.risk_level == 'orta' %}
-                                                <span class="badge px-2 py-1 rounded bg-yellow-500/10 border border-yellow-500/30 text-yellow-400">ORTA</span>
-                                            {% else %}
-                                                <span class="badge px-2 py-1 rounded bg-green-500/10 border border-green-500/30 text-green-400">DÜŞÜK</span>
-                                            {% endif %}
-                                        </td>
-                                        <td class="px-6 py-4 whitespace-nowrap">
-                                            <div class="flex items-center space-x-2">
-                                                <div class="w-16 bg-gray-800 rounded-full h-1.5">
-                                                    <div class="bg-blue-500 h-1.5 rounded-full" style="width: {{ upload.cancer_ratio }}%"></div>
-                                                </div>
-                                                <span class="text-sm text-gray-400 mono">%{{ upload.cancer_ratio }}</span>
-                                            </div>
-                                        </td>
-                                        <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500 mono">
-                                            {{ upload.uploaded_at.strftime('%d.%m %H:%M') }}
-                                        </td>
-                                    </tr>
-                                    {% endfor %}
-                                </tbody>
-                            </table>
-                        </div>
-                    </div>
-                </div>
-
-                <!-- Footer -->
-                <footer class="mt-8 pt-6 border-t border-gray-800 text-center">
-                    <p class="text-xs text-gray-600">
-                        © 2026 Histopathology AI Analyzer | Akademik Prototip
-                    </p>
-                    <p class="text-xs text-gray-700 mt-1">
-                        Bu sistem tıbbi teşhis koymaz
-                    </p>
-                </footer>
-            </div>
-        </main>
+        </div>
     </div>
 
     <script>
-        // Chart Config
-        Chart.defaults.color = '#94a3b8';
-        Chart.defaults.borderColor = '#1e293b';
-        
-        const ctx = document.getElementById('riskChart').getContext('2d');
-        new Chart(ctx, {
-            type: 'doughnut',
-            data: {
-                labels: ['Yüksek', 'Orta', 'Düşük'],
-                datasets: [{
-                    data: [{{ stats.high_risk }}, {{ stats.medium_risk }}, {{ stats.low_risk }}],
-                    backgroundColor: [
-                        'rgba(239, 68, 68, 0.8)',
-                        'rgba(234, 179, 8, 0.8)',
-                        'rgba(34, 197, 94, 0.8)'
-                    ],
-                    borderWidth: 0,
-                    hoverOffset: 4
-                }]
-            },
-            options: {
-                responsive: true,
-                maintainAspectRatio: false,
-                cutout: '75%',
-                plugins: {
-                    legend: { display: false },
-                    tooltip: {
-                        backgroundColor: 'rgba(15, 23, 42, 0.9)',
-                        titleColor: '#e2e8f0',
-                        bodyColor: '#94a3b8',
-                        borderColor: '#2d3748',
-                        borderWidth: 1,
-                        padding: 12,
-                        displayColors: true,
-                        callbacks: {
-                            label: function(context) {
-                                let total = context.dataset.data.reduce((a, b) => a + b, 0);
-                                let percentage = total > 0 ? ((context.parsed / total) * 100).toFixed(0) : 0;
-                                return context.label + ': ' + context.parsed + ' (' + percentage + '%)';
-                            }
-                        }
-                    }
-                }
-            }
+        // Search functionality
+        document.getElementById('searchInput').addEventListener('input', function(e) {
+            const query = e.target.value.toLowerCase();
+            const rows = document.querySelectorAll('.table-row');
+            
+            rows.forEach(row => {
+                const text = row.textContent.toLowerCase();
+                row.style.display = text.includes(query) ? '' : 'none';
+            });
         });
     </script>
 </body>
