@@ -1,7 +1,7 @@
 import os, uuid, traceback, threading, time, json, csv, io
 from datetime import datetime, timedelta
 from functools import wraps
-from flask import Flask, request, jsonify, render_template, redirect, url_for, flash, session, Response
+from flask import Flask, request, jsonify, render_template, redirect, url_for, flash, session, Response, abort  # ✅ abort eklendi
 from flask_sqlalchemy import SQLAlchemy
 from flask_talisman import Talisman
 from flask_wtf import CSRFProtect
@@ -15,9 +15,9 @@ app.config["MAX_CONTENT_LENGTH"] = 32 * 1024 * 1024
 app.config["SQLALCHEMY_DATABASE_URI"] = os.environ.get("DATABASE_URL")
 app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
 
-# 🔐 Session & Security Config (Render için optimize)
+# 🔐 Session & Security Config
 app.config["SECRET_KEY"] = os.environ.get("SECRET_KEY", os.urandom(32).hex())
-app.config["SESSION_COOKIE_SECURE"] = True  # Sadece HTTPS
+app.config["SESSION_COOKIE_SECURE"] = True
 app.config["SESSION_COOKIE_HTTPONLY"] = True
 app.config["SESSION_COOKIE_SAMESITE"] = "Lax"
 app.config["PERMANENT_SESSION_LIFETIME"] = timedelta(hours=24)
@@ -79,6 +79,7 @@ class ImageUpload(db.Model):
     cancer_patches = db.Column(db.Integer)
     processing_time_ms = db.Column(db.Integer)
     status = db.Column(db.String(20), default="completed")
+    # ✅ Yeni sütunlar
     image_dimensions = db.Column(db.String(20))
     confidence_score = db.Column(db.Float)
     patch_details = db.Column(db.Text)
@@ -145,14 +146,53 @@ def is_likely_histopathology(image_array):
     except Exception as e:
         return False, f"Doku analizi hatası: {str(e)}"
 
+# 🚀 VERİTABANI MIGRATION (Sütun Ekleme)
+def migrate_database():
+    """PostgreSQL tablosuna eksik sütunları ekler"""
+    with app.app_context():
+        try:
+            # db.create_all() sadece tablo yoksa oluşturur, sütun eklemez.
+            # Bu yüzden manuel ALTER TABLE kullanıyoruz.
+            conn = db.engine.raw_connection()
+            cursor = conn.cursor()
+            
+            # Sütunları kontrol et ve ekle
+            columns_to_add = {
+                "image_dimensions": "VARCHAR(20)",
+                "confidence_score": "FLOAT",
+                "patch_details": "TEXT",
+                "reviewed_by": "VARCHAR(50)"
+            }
+            
+            # Mevcut sütunları sorgula
+            cursor.execute("""
+                SELECT column_name FROM information_schema.columns 
+                WHERE table_name = 'uploads'
+            """)
+            existing_cols = [row[0] for row in cursor.fetchall()]
+            
+            # Eksikleri ekle
+            for col_name, col_type in columns_to_add.items():
+                if col_name not in existing_cols:
+                    print(f"🔧 Eksik sütun ekleniyor: {col_name} {col_type}")
+                    cursor.execute(f'ALTER TABLE uploads ADD COLUMN IF NOT EXISTS {col_name} {col_type}')
+                    conn.commit()
+            
+            cursor.close()
+            conn.close()
+            print("✅ Veritabanı migration tamamlandı.")
+            
+        except Exception as e:
+            print(f"⚠️ Migration hatası: {e}")
+            # Hata olsa bile uygulamanın çökmemesi için devam et
+
 # 🌐 ROUTES
 @app.route("/")
 def home():
     return render_template("index.html")
 
-# ✅ ROBUST LOGIN - CSRF EXEMPT + ERROR LOGGING
 @app.route("/admin/login", methods=["GET", "POST"])
-@csrf.exempt  # 🔑 KRİTİK: Login rotasını CSRF korumasından TAMAMEN muaf tut
+@csrf.exempt
 def admin_login():
     print(f"🔍 Login isteği: {request.method}")
     
@@ -165,13 +205,12 @@ def admin_login():
             user = AdminUser.query.filter_by(username=username).first()
             expected_pass = os.environ.get("ADMIN_PASSWORD", "SecurePass123!")
             
-            # Debug: DB'den gelen hash'i kontrol et
             if user:
                 print(f"✅ Kullanıcı bulundu, password check: {user.check_password(password)}")
             
             if user and user.check_password(password) and user.is_active:
                 print("✅ Giriş başarılı, session oluşturuluyor...")
-                session.clear()  # Önceki session'ı temizle
+                session.clear()
                 session["admin_logged_in"] = True
                 session["admin_user"] = username
                 session.permanent = True
@@ -186,7 +225,6 @@ def admin_login():
                     print(f"⚠️ Audit log hatası: {log_err}")
                 
                 flash("Giriş başarılı.", "success")
-                # ✅ Explicit redirect with 302
                 response = redirect("/dashboard", code=302)
                 print("🚀 Dashboard'a yönlendiriliyor...")
                 return response
@@ -365,7 +403,7 @@ def internal_error(error):
 def not_found(error):
     if request.path.startswith('/upload') or request.path.startswith('/status') or request.is_json:
         return jsonify({"error": "Endpoint bulunamadı"}), 404
-    abort(404)
+    return abort(404)  # ✅ abort artık tanımlı
 
 @app.errorhandler(405)
 def method_not_allowed(error):
@@ -378,23 +416,12 @@ def method_not_allowed(error):
 def bad_request(error):
     if request.path.startswith('/upload') or request.path.startswith('/status') or request.is_json:
         return jsonify({"error": "Geçersiz istek"}), 400
-    abort(400)
+    return abort(400)
 
 # 🚀 BAŞLANGIÇ
-with app.app_context():
-    try:
-        db.create_all()
-        if not AdminUser.query.first():
-            admin_user = AdminUser(username="admin")
-            admin_user.set_password(os.environ.get("ADMIN_PASSWORD", "SecurePass123!"))
-            db.session.add(admin_user)
-            db.session.commit()
-            print("✅ Varsayılan admin kullanıcısı oluşturuldu.")
-    except Exception as e:
-        print(f"⚠️ DB init hatası: {e}")
-
-jobs = {}
-
 if __name__ == "__main__":
+    # ✅ Migration'ı çalıştır (Tablo sütunlarını güncelle)
+    migrate_database()
+    
     port = int(os.environ.get("PORT", 5000))
     app.run(host="0.0.0.0", port=port, debug=False)
