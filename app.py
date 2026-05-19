@@ -19,8 +19,8 @@ app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
 app.config["SECRET_KEY"] = os.environ.get("SECRET_KEY", os.urandom(32).hex())
 app.config["SESSION_COOKIE_SECURE"] = False  # Render proxy'si nedeniyle False
 app.config["SESSION_COOKIE_HTTPONLY"] = True
-app.config["SESSION_COOKIE_SAMESITE"] = "Lax"  # Cross-site redirect için Lax
-app.config["SESSION_COOKIE_PATH"] = "/"  # Tüm yollar için cookie geçerli
+app.config["SESSION_COOKIE_SAMESITE"] = "Lax"
+app.config["SESSION_COOKIE_PATH"] = "/"
 app.config["PERMANENT_SESSION_LIFETIME"] = timedelta(hours=24)
 
 # 🔹 PostgreSQL (Neon) Optimizasyonu
@@ -148,8 +148,9 @@ def is_likely_histopathology(image_array):
     except Exception as e:
         return False, f"Doku analizi hatası: {str(e)}"
 
-# 🚀 VERİTABANI MIGRATION
+# 🚀 VERİTABANI MIGRATION (GLOBAL BAŞLANGIÇTA ÇALIŞIR)
 def migrate_database():
+    """PostgreSQL tablosuna eksik sütunları ekler - Gunicorn ile de çalışır"""
     with app.app_context():
         try:
             conn = db.engine.raw_connection()
@@ -172,6 +173,9 @@ def migrate_database():
             print("✅ Veritabanı migration tamamlandı.")
         except Exception as e:
             print(f"⚠️ Migration hatası: {e}")
+
+# ✅ MIGRATION'I HEMEN ÇALIŞTIR (gunicorn için kritik)
+migrate_database()
 
 # 🌐 ROUTES
 @app.route("/")
@@ -201,7 +205,7 @@ def admin_login():
                 session["admin_logged_in"] = True
                 session["admin_user"] = username
                 session.permanent = True
-                session.modified = True  # Session'ın kaydedilmesini zorla
+                session.modified = True
                 
                 try:
                     log = AuditLog(action="ADMIN_LOGIN", ip_address=request.remote_addr)
@@ -214,12 +218,10 @@ def admin_login():
                 
                 flash("Giriş başarılı.", "success")
                 
-                # Debug log
                 print(f"🍪 Session cookie ayarları: Secure={app.config['SESSION_COOKIE_SECURE']}, SameSite={app.config['SESSION_COOKIE_SAMESITE']}, Path={app.config['SESSION_COOKIE_PATH']}")
                 print(f"🔑 Session içeriği: {dict(session)}")
                 
-                # ✅ CLIENT-SIDE REDIRECT (Cookie oturması için JavaScript kullan)
-                # Bu, tarayıcının cookie'yi kabul etmesini garanti eder
+                # ✅ CLIENT-SIDE REDIRECT
                 html_response = '''
                 <!DOCTYPE html>
                 <html>
@@ -400,7 +402,8 @@ def dashboard():
         return render_template("dashboard.html", stats={"total": total, "high_risk": high_risk, "medium_risk": medium_risk, "low_risk": low_risk, "today": today}, recent=recent)
     except Exception as e:
         print(f"❌ Dashboard hatası: {e}")
-        return render_template("admin/login.html", error="Dashboard yüklenemedi."), 500
+        # DB hatası olunca login'e redirect etme, kullanıcıyı döngüye sokar
+        return render_template("admin/login.html", error=f"Dashboard yüklenemedi: {str(e)[:100]}..."), 500
 
 # ⚠️ HATA YÖNETİCİLERİ
 @app.errorhandler(500)
@@ -414,7 +417,7 @@ def internal_error(error):
 def not_found(error):
     if request.path.startswith('/upload') or request.path.startswith('/status') or request.is_json:
         return jsonify({"error": "Endpoint bulunamadı"}), 404
-    return abort(404)
+    return abort(404)  # ✅ abort artık import edildi
 
 @app.errorhandler(405)
 def method_not_allowed(error):
@@ -430,7 +433,7 @@ def bad_request(error):
     return abort(400)
 
 # 🚀 BAŞLANGIÇ
+# migrate_database() zaten yukarıda çağrıldı, burada sadece server başlatılır
 if __name__ == "__main__":
-    migrate_database()
     port = int(os.environ.get("PORT", 5000))
     app.run(host="0.0.0.0", port=port, debug=False)
