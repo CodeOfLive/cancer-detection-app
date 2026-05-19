@@ -17,7 +17,7 @@ app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
 
 # 🔐 Session & Security Config (Render için optimize)
 app.config["SECRET_KEY"] = os.environ.get("SECRET_KEY", os.urandom(32).hex())
-app.config["SESSION_COOKIE_SECURE"] = False  # Render proxy'si nedeniyle False
+app.config["SESSION_COOKIE_SECURE"] = False
 app.config["SESSION_COOKIE_HTTPONLY"] = True
 app.config["SESSION_COOKIE_SAMESITE"] = "Lax"
 app.config["SESSION_COOKIE_PATH"] = "/"
@@ -148,9 +148,8 @@ def is_likely_histopathology(image_array):
     except Exception as e:
         return False, f"Doku analizi hatası: {str(e)}"
 
-# 🚀 VERİTABANI MIGRATION (GLOBAL BAŞLANGIÇTA ÇALIŞIR)
+# 🚀 VERİTABANI MIGRATION
 def migrate_database():
-    """PostgreSQL tablosuna eksik sütunları ekler - Gunicorn ile de çalışır"""
     with app.app_context():
         try:
             conn = db.engine.raw_connection()
@@ -174,8 +173,11 @@ def migrate_database():
         except Exception as e:
             print(f"⚠️ Migration hatası: {e}")
 
-# ✅ MIGRATION'I HEMEN ÇALIŞTIR (gunicorn için kritik)
+# ✅ MIGRATION'I HEMEN ÇALIŞTIR
 migrate_database()
+
+# ✅ JOBS DICTIONARY - ROUTE'LARDAN ÖNCE TANIMLANMALI!
+jobs = {}
 
 # 🌐 ROUTES
 @app.route("/")
@@ -221,7 +223,6 @@ def admin_login():
                 print(f"🍪 Session cookie ayarları: Secure={app.config['SESSION_COOKIE_SECURE']}, SameSite={app.config['SESSION_COOKIE_SAMESITE']}, Path={app.config['SESSION_COOKIE_PATH']}")
                 print(f"🔑 Session içeriği: {dict(session)}")
                 
-                # ✅ CLIENT-SIDE REDIRECT
                 html_response = '''
                 <!DOCTYPE html>
                 <html>
@@ -402,7 +403,6 @@ def dashboard():
         return render_template("dashboard.html", stats={"total": total, "high_risk": high_risk, "medium_risk": medium_risk, "low_risk": low_risk, "today": today}, recent=recent)
     except Exception as e:
         print(f"❌ Dashboard hatası: {e}")
-        # DB hatası olunca login'e redirect etme, kullanıcıyı döngüye sokar
         return render_template("admin/login.html", error=f"Dashboard yüklenemedi: {str(e)[:100]}..."), 500
 
 # ⚠️ HATA YÖNETİCİLERİ
@@ -417,7 +417,7 @@ def internal_error(error):
 def not_found(error):
     if request.path.startswith('/upload') or request.path.startswith('/status') or request.is_json:
         return jsonify({"error": "Endpoint bulunamadı"}), 404
-    return abort(404)  # ✅ abort artık import edildi
+    return abort(404)
 
 @app.errorhandler(405)
 def method_not_allowed(error):
@@ -433,7 +433,6 @@ def bad_request(error):
     return abort(400)
 
 # 🚀 BAŞLANGIÇ
-# migrate_database() zaten yukarıda çağrıldı, burada sadece server başlatılır
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
     app.run(host="0.0.0.0", port=port, debug=False)
